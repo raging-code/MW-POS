@@ -353,7 +353,7 @@ app.use('/api/*', async (c, next) => {
   c.set('db', db)
 
   // Public routes skip auth
-  const publicPaths = ['/api/auth/login', '/api/auth/users']
+  const publicPaths = ['/api/auth/login', '/api/auth/users', '/api/init']
   if (publicPaths.some(p => c.req.path.startsWith(p))) {
     return next()
   }

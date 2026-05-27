@@ -13,6 +13,6 @@
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "../src/type.ts", "../src/store.ts"],
   "exclude": ["node_modules"]
 }

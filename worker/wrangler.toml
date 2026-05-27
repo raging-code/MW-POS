@@ -9,5 +9,5 @@ TIMEZONE = "Asia/Manila"
 [[d1_databases]]
 binding = "DB"
 database_name = "pos-db"
-database_id = "REPLACE_WITH_YOUR_D1_ID"
+database_id = "f088097e-c342-4ce5-a65e-721d45bc1596"
 migrations_dir = "migrations"

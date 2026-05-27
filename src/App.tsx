@@ -1,22 +1,22 @@
-// src/App.tsx — MangoWarrior POS
-// Complete UI: Login, POS, Sales, Employee Portal, Admin
-
-import React, { useState, useEffect, useCallback, useRef } from 'react'
-import { format, parseISO, differenceInMinutes } from 'date-fns'
-import { clsx } from 'clsx'
+// src/App.tsx — MangoWarrior POS (fully typed, all errors fixed)
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { format, parseISO, differenceInMinutes } from 'date-fns';
+import { clsx } from 'clsx';
 import {
   ShoppingCart, Search, X, Plus, Minus, ChevronDown, ChevronUp,
   LogOut, Users, BarChart2, Settings, Package, Clock, Receipt,
   AlertTriangle, CheckCircle, Printer, Trash2, Edit2, RefreshCw,
   DollarSign, TrendingUp, Menu as MenuIcon, ShieldCheck,
   ArrowLeft, Save, ChevronRight, Coffee, Star,
-} from 'lucide-react'
-import { useAuthStore, useCartStore, useUIStore } from './store'
+} from 'lucide-react';
+import { useAuthStore, useCartStore, useUIStore } from './store';
 import type {
   User, Category, MenuItem, Addon, CartItem, SaleDetail,
   SaleListItem, Shift, PaymentLine, PaymentMethod, Page,
   HeldOrder, TimeLog, Settings as SettingsType,
-} from './types'
+  SaleItemDetail, ItemSize, OrderType, CartAddon, CashDrop,
+  InventoryItem, InventoryTransaction, AuditLog,
+} from './types';
 import {
   useUsersList, useLogin, useVerifyPin, useMenu, useCurrentShift,
   useOpenShift, useCloseShift, useCashDrop, useHeldOrders,
@@ -29,31 +29,29 @@ import {
   useCreateInventoryItem, useCreateInventoryTransaction, useAuditLogs,
   useToggleAvailability, useCreateMenuItem, useUpdateMenuItem,
   useDeleteMenuItem, useCreateCategory, useUpdateAddon, useCreateAddon,
-} from './api'
+} from './api';
 
-// ============================================================
-// SECTION 1: BASE UI PRIMITIVES
-// ============================================================
+const MANGO = '#F5C518';
+const WARRIOR = '#E63946';
 
-const MANGO = '#F5C518'
-const WARRIOR = '#E63946'
+// ─── UI Primitives ───────────────────────────────────────
 
 function Btn({
   children, onClick, variant = 'primary', size = 'md', disabled, loading, className, type = 'button', fullWidth,
 }: {
   children: React.ReactNode; onClick?: () => void; variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'mango'
   size?: 'sm' | 'md' | 'lg'; disabled?: boolean; loading?: boolean; className?: string; type?: 'button' | 'submit'
-  fullWidth?: boolean
+  fullWidth?: boolean; title?: string
 }) {
-  const base = 'inline-flex items-center justify-center font-medium rounded-lg transition-all active:scale-95 select-none'
-  const sizes = { sm: 'px-3 py-1.5 text-sm gap-1.5', md: 'px-4 py-2 text-sm gap-2', lg: 'px-6 py-3 text-base gap-2' }
+  const base = 'inline-flex items-center justify-center font-medium rounded-lg transition-all active:scale-95 select-none';
+  const sizes = { sm: 'px-3 py-1.5 text-sm gap-1.5', md: 'px-4 py-2 text-sm gap-2', lg: 'px-6 py-3 text-base gap-2' };
   const variants = {
     primary:   'bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50',
     mango:     'text-gray-900 hover:opacity-90 disabled:opacity-50',
     secondary: 'bg-gray-700 text-gray-200 hover:bg-gray-600 disabled:opacity-50',
     danger:    'bg-red-700 text-white hover:bg-red-600 disabled:opacity-50',
     ghost:     'text-gray-400 hover:text-gray-200 hover:bg-gray-700 disabled:opacity-50',
-  }
+  };
   return (
     <button
       type={type} onClick={onClick}
@@ -63,7 +61,7 @@ function Btn({
     >
       {loading ? <RefreshCw size={14} className="animate-spin" /> : children}
     </button>
-  )
+  );
 }
 
 function Input({
@@ -84,7 +82,7 @@ function Input({
           focus:outline-none focus:border-yellow-500 placeholder-gray-600 disabled:opacity-50 w-full"
       />
     </div>
-  )
+  );
 }
 
 function Select({
@@ -101,10 +99,10 @@ function Select({
         className="bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm
           focus:outline-none focus:border-yellow-500"
       >
-        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        {options.map((o: { value: string; label: string }) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </div>
-  )
+  );
 }
 
 function Modal({
@@ -113,13 +111,13 @@ function Modal({
   open: boolean; onClose?: () => void; title?: string; children: React.ReactNode; maxWidth?: string
 }) {
   useEffect(() => {
-    if (!open) return
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose?.() }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [open, onClose])
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose?.() };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, onClose]);
 
-  if (!open) return null
+  if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
@@ -133,7 +131,7 @@ function Modal({
         <div className="p-5">{children}</div>
       </div>
     </div>
-  )
+  );
 }
 
 function Badge({ children, color = 'gray' }: { children: React.ReactNode; color?: string }) {
@@ -143,61 +141,59 @@ function Badge({ children, color = 'gray' }: { children: React.ReactNode; color?
     red:    'bg-red-900/60 text-red-400',
     yellow: 'bg-yellow-900/60 text-yellow-400',
     blue:   'bg-blue-900/60 text-blue-400',
-  }
+  };
   return (
     <span className={clsx('px-2 py-0.5 rounded text-xs font-medium', colors[color] ?? colors.gray)}>
       {children}
     </span>
-  )
+  );
 }
 
 function toast(msg: string, type: 'success' | 'error' = 'success') {
-  const el = document.createElement('div')
+  const el = document.createElement('div');
   el.className = clsx(
     'fixed top-5 right-5 z-[999] px-4 py-3 rounded-lg text-sm font-medium shadow-xl transition-all',
     type === 'success' ? 'bg-green-800 text-green-200' : 'bg-red-800 text-red-200'
-  )
-  el.textContent = msg
-  document.body.appendChild(el)
-  setTimeout(() => el.remove(), 3000)
+  );
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
 }
 
-function fmt(amount: number) { return `₱${amount.toFixed(2)}` }
+function fmt(amount: number) { return `₱${amount.toFixed(2)}`; }
 function fmtDate(iso: string) {
-  try { return format(parseISO(iso), 'MMM d, yyyy h:mm a') } catch { return iso }
+  try { return format(parseISO(iso), 'MMM d, yyyy h:mm a'); } catch { return iso; }
 }
 
-// ============================================================
-// SECTION 2: PIN MODAL (Global sensitive-action gate)
-// ============================================================
+// ─── PIN Modal ──────────────────────────────────────────
 
 function PinModal() {
-  const { pinModal, resolvePinModal } = useUIStore()
-  const { user } = useAuthStore()
-  const [pin, setPin] = useState('')
-  const [error, setError] = useState('')
-  const verifyPin = useVerifyPin()
+  const { pinModal, resolvePinModal } = useUIStore();
+  const { user } = useAuthStore();
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
+  const verifyPin = useVerifyPin();
 
-  useEffect(() => { if (pinModal.open) { setPin(''); setError('') } }, [pinModal.open])
+  useEffect(() => { if (pinModal.open) { setPin(''); setError(''); } }, [pinModal.open]);
 
   const submit = async () => {
-    if (!user || pin.length !== 6) return
+    if (!user || pin.length !== 6) return;
     try {
-      await verifyPin.mutateAsync({ user_id: user.id, pin, required_role: pinModal.required_role })
-      resolvePinModal(true)
+      await verifyPin.mutateAsync({ user_id: user.id, pin, required_role: pinModal.required_role });
+      resolvePinModal(true);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Invalid PIN')
-      setPin('')
+      setError(e instanceof Error ? e.message : 'Invalid PIN');
+      setPin('');
     }
-  }
+  };
 
   const press = (val: string) => {
-    if (val === 'DEL') { setPin(p => p.slice(0, -1)); return }
-    if (pin.length >= 6) return
-    const next = pin + val
-    setPin(next)
-    if (next.length === 6) setTimeout(() => submit(), 50)
-  }
+    if (val === 'DEL') { setPin(p => p.slice(0, -1)); return; }
+    if (pin.length >= 6) return;
+    const next = pin + val;
+    setPin(next);
+    if (next.length === 6) setTimeout(() => submit(), 50);
+  };
 
   return (
     <Modal open={pinModal.open} onClose={() => resolvePinModal(false)}
@@ -207,9 +203,8 @@ function PinModal() {
           Verify your 6-digit PIN to continue
           {pinModal.required_role === 'admin' && ' (Admin access required)'}
         </p>
-        {/* PIN dots */}
         <div className="flex gap-3">
-          {Array.from({ length: 6 }).map((_, i) => (
+          {Array.from({ length: 6 }).map((_, i: number) => (
             <div key={i} className={clsx(
               'w-10 h-10 rounded-full border-2 flex items-center justify-center text-lg',
               i < pin.length ? 'border-yellow-500 bg-yellow-500/20' : 'border-gray-600'
@@ -219,9 +214,8 @@ function PinModal() {
           ))}
         </div>
         {error && <p className="text-red-400 text-sm">{error}</p>}
-        {/* Numpad */}
         <div className="grid grid-cols-3 gap-2 w-full max-w-[220px]">
-          {['1','2','3','4','5','6','7','8','9','','0','DEL'].map((k, i) => (
+          {['1','2','3','4','5','6','7','8','9','','0','DEL'].map((k: string, i: number) => (
             k === '' ? <div key={i} /> : (
               <button key={i} onClick={() => press(k)}
                 className={clsx(
@@ -236,14 +230,12 @@ function PinModal() {
         <Btn onClick={() => resolvePinModal(false)} variant="ghost" size="sm">Cancel</Btn>
       </div>
     </Modal>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 3: RECEIPT (Print View)
-// ============================================================
+// ─── Receipt component (print view) ─────────────────────
 
-function Receipt({ sale, settings }: { sale: SaleDetail; settings: SettingsType }) {
+function SaleReceipt({ sale, settings }: { sale: SaleDetail; settings: SettingsType }) {
   return (
     <div id="receipt-print" className="bg-white text-gray-900 p-4 text-xs font-mono max-w-[280px] mx-auto">
       <div className="text-center mb-3">
@@ -258,13 +250,13 @@ function Receipt({ sale, settings }: { sale: SaleDetail; settings: SettingsType 
       <div className="flex justify-between"><span>Type:</span><span>{sale.order_type === 'dine_in' ? 'Dine In' : 'Take Out'}</span></div>
       {sale.note && <div className="flex justify-between"><span>Note:</span><span>{sale.note}</span></div>}
       <div className="border-t border-dashed border-gray-400 my-2" />
-      {sale.items.map((item, i) => (
+      {sale.items.map((item: SaleItemDetail, i: number) => (
         <div key={i} className="mb-1">
           <div className="flex justify-between font-medium">
             <span>{item.qty}x {item.item_name}{item.size_name ? ` (${item.size_name})` : ''}</span>
             <span>{fmt(item.final_price)}</span>
           </div>
-          {item.addons.map((a, j) => (
+          {item.addons.map((a: { addon_name: string; addon_price: number; qty: number }, j: number) => (
             <div key={j} className="flex justify-between pl-3 text-gray-600">
               <span>+ {a.addon_name} x{a.qty}</span>
               <span>{fmt(a.addon_price * a.qty)}</span>
@@ -282,7 +274,7 @@ function Receipt({ sale, settings }: { sale: SaleDetail; settings: SettingsType 
       <div className="flex justify-between"><span>Subtotal:</span><span>{fmt(sale.subtotal)}</span></div>
       {sale.discount_total > 0 && <div className="flex justify-between text-gray-600"><span>Discount:</span><span>-{fmt(sale.discount_total)}</span></div>}
       <div className="flex justify-between font-bold text-sm"><span>TOTAL:</span><span>{fmt(sale.total)}</span></div>
-      {sale.payments.map((p, i) => (
+      {sale.payments.map((p: PaymentLine, i: number) => (
         <div key={i} className="flex justify-between"><span>{p.method.toUpperCase()}:</span><span>{fmt(p.amount)}</span></div>
       ))}
       {sale.change_amount != null && sale.change_amount > 0 && (
@@ -292,52 +284,49 @@ function Receipt({ sale, settings }: { sale: SaleDetail; settings: SettingsType 
       <div className="text-center text-gray-600">{settings.receipt_footer ?? 'Thank you!'}</div>
       {sale.sale_type === 'missed' && <div className="text-center font-bold text-red-600 mt-1">*** MISSED SALE ***</div>}
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 4: LOGIN PAGE
-// ============================================================
+// ─── Login page ─────────────────────────────────────────
 
 function LoginPage() {
-  const { data: usersList, isLoading } = useUsersList()
-  const login = useLogin()
-  const { login: authLogin } = useAuthStore()
-  const { navigate } = useUIStore()
-  const [selectedUser, setSelectedUser] = useState<User | null>(null)
-  const [pin, setPin] = useState('')
-  const [error, setError] = useState('')
+  const { data: usersList, isLoading } = useUsersList();
+  const login = useLogin();
+  const { login: authLogin } = useAuthStore();
+  const { navigate } = useUIStore();
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
 
   const pressPin = (val: string) => {
-    if (val === 'DEL') { setPin(p => p.slice(0, -1)); return }
-    if (pin.length >= 6) return
-    const next = pin + val
-    setPin(next)
+    if (val === 'DEL') { setPin(p => p.slice(0, -1)); return; }
+    if (pin.length >= 6) return;
+    const next = pin + val;
+    setPin(next);
     if (next.length === 6) {
       setTimeout(async () => {
-        if (!selectedUser) return
+        if (!selectedUser) return;
         try {
-          const res = await login.mutateAsync({ user_id: selectedUser.id, pin: next })
-          authLogin(res.user, res.token)
-          navigate(res.user.role === 'admin' ? 'admin_dashboard' : 'pos')
+          const res = await login.mutateAsync({ user_id: selectedUser.id, pin: next });
+          authLogin(res.user, res.token);
+          navigate(res.user.role === 'admin' ? 'admin_dashboard' : 'pos');
         } catch (e: unknown) {
-          setError(e instanceof Error ? e.message : 'Invalid PIN')
-          setPin('')
+          setError(e instanceof Error ? e.message : 'Invalid PIN');
+          setPin('');
         }
-      }, 50)
+      }, 50);
     }
-  }
+  };
 
   if (isLoading) return (
     <div className="h-full bg-gray-950 flex items-center justify-center">
       <RefreshCw className="text-yellow-500 animate-spin" size={32} />
     </div>
-  )
+  );
 
   return (
     <div className="h-full bg-gray-950 flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        {/* Brand */}
         <div className="text-center mb-8">
           <div className="text-4xl font-black mb-1" style={{ color: MANGO }}>🥭 MangoWarrior</div>
           <div className="text-gray-500 text-sm">Point of Sale System</div>
@@ -347,8 +336,8 @@ function LoginPage() {
           <div>
             <p className="text-gray-400 text-sm text-center mb-4">Select your account</p>
             <div className="flex flex-col gap-2">
-              {(usersList ?? []).map(u => (
-                <button key={u.id} onClick={() => { setSelectedUser(u); setPin(''); setError('') }}
+              {(usersList ?? []).map((u: User) => (
+                <button key={u.id} onClick={() => { setSelectedUser(u); setPin(''); setError(''); }}
                   className="flex items-center gap-3 p-4 bg-gray-800 hover:bg-gray-700 border border-gray-700
                     hover:border-yellow-500 rounded-xl transition-all text-left">
                   <div className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-gray-900"
@@ -366,7 +355,7 @@ function LoginPage() {
           </div>
         ) : (
           <div className="flex flex-col items-center gap-5">
-            <button onClick={() => { setSelectedUser(null); setPin('') }}
+            <button onClick={() => { setSelectedUser(null); setPin(''); }}
               className="flex items-center gap-2 text-gray-400 hover:text-gray-200 text-sm">
               <ArrowLeft size={14} /> Back
             </button>
@@ -381,7 +370,7 @@ function LoginPage() {
             </div>
 
             <div className="flex gap-3">
-              {Array.from({ length: 6 }).map((_, i) => (
+              {Array.from({ length: 6 }).map((_, i: number) => (
                 <div key={i} className={clsx(
                   'w-10 h-10 rounded-full border-2 flex items-center justify-center',
                   i < pin.length ? 'border-yellow-500 bg-yellow-500/20 text-white' : 'border-gray-600'
@@ -394,7 +383,7 @@ function LoginPage() {
             {error && <p className="text-red-400 text-sm">{error}</p>}
 
             <div className="grid grid-cols-3 gap-2 w-full max-w-[220px]">
-              {['1','2','3','4','5','6','7','8','9','','0','DEL'].map((k, i) => (
+              {['1','2','3','4','5','6','7','8','9','','0','DEL'].map((k: string, i: number) => (
                 k === '' ? <div key={i} /> : (
                   <button key={i} onClick={() => pressPin(k)}
                     className={clsx(
@@ -410,26 +399,24 @@ function LoginPage() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 5: MAIN NAVIGATION HEADER
-// ============================================================
+// ─── Header ─────────────────────────────────────────────
 
 function Header() {
-  const { user, logout } = useAuthStore()
-  const { page, navigate } = useUIStore()
-  const { data: shift } = useCurrentShift()
-  const openPinModal = useUIStore(s => s.openPinModal)
-  const [menuOpen, setMenuOpen] = useState(false)
+  const { user, logout } = useAuthStore();
+  const { page, navigate } = useUIStore();
+  const { data: shift } = useCurrentShift();
+  const openPinModal = useUIStore(s => s.openPinModal);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const handleLogout = async () => {
-    const ok = await openPinModal()
-    if (!ok) return
-    fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${useAuthStore.getState().token}` } })
-    logout()
-  }
+    const ok = await openPinModal();
+    if (!ok) return;
+    fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${useAuthStore.getState().token}` } });
+    logout();
+  };
 
   const navItems: { label: string; page: Page; icon: React.ReactNode; adminOnly?: boolean }[] = [
     { label: 'POS', page: 'pos', icon: <ShoppingCart size={15} /> },
@@ -441,23 +428,19 @@ function Header() {
     { label: 'Inventory', page: 'admin_inventory', icon: <Package size={15} />, adminOnly: true },
     { label: 'Settings', page: 'admin_settings', icon: <Settings size={15} />, adminOnly: true },
     { label: 'Audit', page: 'admin_audit', icon: <ShieldCheck size={15} />, adminOnly: true },
-  ]
+  ];
 
-  const visible = navItems.filter(n => !n.adminOnly || user?.role === 'admin')
+  const visible = navItems.filter((n: { adminOnly?: boolean }) => !n.adminOnly || user?.role === 'admin');
 
   return (
     <header className="flex items-center h-12 px-3 bg-gray-900 border-b border-gray-800 shrink-0 z-30">
       <div className="font-black text-base mr-4" style={{ color: MANGO }}>🥭 MW</div>
-
-      {/* Shift status */}
       <div className="mr-4 hidden sm:flex items-center gap-1.5">
         <div className={clsx('w-2 h-2 rounded-full', shift ? 'bg-green-400 animate-pulse' : 'bg-gray-600')} />
         <span className="text-xs text-gray-400">{shift ? 'Shift Open' : 'No Shift'}</span>
       </div>
-
-      {/* Desktop nav */}
       <nav className="hidden md:flex items-center gap-1 flex-1">
-        {visible.map(n => (
+        {visible.map((n: { page: Page; label: string; icon: React.ReactNode }) => (
           <button key={n.page} onClick={() => navigate(n.page)}
             className={clsx(
               'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
@@ -470,16 +453,14 @@ function Header() {
           </button>
         ))}
       </nav>
-
-      {/* Mobile hamburger */}
       <div className="md:hidden flex-1">
         <button onClick={() => setMenuOpen(v => !v)} className="text-gray-400 p-1">
           <MenuIcon size={18} />
         </button>
         {menuOpen && (
           <div className="absolute top-12 left-0 right-0 bg-gray-900 border-b border-gray-700 z-50 p-2 flex flex-col gap-1">
-            {visible.map(n => (
-              <button key={n.page} onClick={() => { navigate(n.page); setMenuOpen(false) }}
+            {visible.map((n: { page: Page; label: string; icon: React.ReactNode }) => (
+              <button key={n.page} onClick={() => { navigate(n.page); setMenuOpen(false); }}
                 className={clsx(
                   'flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium',
                   page === n.page ? 'text-gray-900' : 'text-gray-400'
@@ -491,8 +472,6 @@ function Header() {
           </div>
         )}
       </div>
-
-      {/* User + logout */}
       <div className="flex items-center gap-3 ml-auto">
         <span className="text-xs text-gray-400 hidden sm:block">{user?.name}</span>
         <button onClick={handleLogout} className="text-gray-500 hover:text-red-400 transition-colors" title="Sign Out">
@@ -500,71 +479,67 @@ function Header() {
         </button>
       </div>
     </header>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 6: POS PAGE
-// ============================================================
+// ─── POS Page ───────────────────────────────────────────
 
 function POSPage() {
-  const { user } = useAuthStore()
-  const cart = useCartStore()
-  const { data: menuData, isLoading: menuLoading } = useMenu()
-  const { data: settings } = useSettings()
-  const { data: shift } = useCurrentShift()
-  const openPinModal = useUIStore(s => s.openPinModal)
+  const { user } = useAuthStore();
+  const cart = useCartStore();
+  const { data: menuData, isLoading: menuLoading } = useMenu();
+  const { data: settings } = useSettings();
+  const { data: shift } = useCurrentShift();
+  const openPinModal = useUIStore(s => s.openPinModal);
 
-  const [activeCategory, setActiveCategory] = useState<string>('all')
-  const [searchQ, setSearchQ] = useState('')
-  const [showCheckout, setShowCheckout] = useState(false)
-  const [showHeld, setShowHeld] = useState(false)
-  const [showShift, setShowShift] = useState(false)
-  const [sizeModal, setSizeModal] = useState<{ item: MenuItem } | null>(null)
+  const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [searchQ, setSearchQ] = useState('');
+  const [showCheckout, setShowCheckout] = useState(false);
+  const [showHeld, setShowHeld] = useState(false);
+  const [showShift, setShowShift] = useState(false);
+  const [sizeModal, setSizeModal] = useState<{ item: MenuItem } | null>(null);
 
-  // Sync discount pcts from settings
   useEffect(() => {
     if (settings) {
       cart.setDiscountPcts(
         parseFloat(settings.sc_discount_pct ?? '20'),
         parseFloat(settings.pwd_discount_pct ?? '20')
-      )
+      );
     }
-  }, [settings])
+  }, [settings]);
 
-  const categories = menuData?.categories ?? []
-  const allItems = categories.flatMap(c => c.items)
-  const filteredItems = allItems.filter(item => {
-    if (!item.is_available) return false
-    const matchCat = activeCategory === 'all' || item.category_id === activeCategory
-    const matchSearch = item.name.toLowerCase().includes(searchQ.toLowerCase())
-    return matchCat && matchSearch
-  })
+  const categories = menuData?.categories ?? [];
+  const allItems = categories.flatMap((c: Category) => c.items);
+  const filteredItems = allItems.filter((item: MenuItem) => {
+    if (!item.is_available) return false;
+    const matchCat = activeCategory === 'all' || item.category_id === activeCategory;
+    const matchSearch = item.name.toLowerCase().includes(searchQ.toLowerCase());
+    return matchCat && matchSearch;
+  });
 
-  const addToCart = (item: MenuItem, sizeName?: string, sizePrice?: number, addons: typeof item.addons = []) => {
-    const price = sizePrice ?? item.sizes[0]?.price ?? 0
+  const addToCart = (item: MenuItem, sizeName?: string, sizePrice?: number, addons: Addon[] = []) => {
+    const price = sizePrice ?? item.sizes[0]?.price ?? 0;
     cart.addItem({
       item_id: item.id, item_name: item.name,
       size_name: sizeName, base_price: price,
-      addons: addons.map(a => ({ addon_id: a.id, addon_name: a.name, addon_price: a.price, qty: 1 })),
-    })
-    setSizeModal(null)
-  }
+      addons: addons.map((a: Addon) => ({ addon_id: a.id, addon_name: a.name, addon_price: a.price, qty: 1 })),
+    });
+    setSizeModal(null);
+  };
 
   const handleItemTap = (item: MenuItem) => {
     if (item.sizes.length > 1) {
-      setSizeModal({ item })
+      setSizeModal({ item });
     } else {
-      addToCart(item, item.sizes[0]?.name, item.sizes[0]?.price)
+      addToCart(item, item.sizes[0]?.name, item.sizes[0]?.price);
     }
-  }
+  };
 
-  const total = cart.total()
-  const itemCount = cart.cart.items.reduce((s, i) => s + i.qty, 0)
+  const total = cart.total();
+  const itemCount = cart.cart.items.reduce((s: number, i: CartItem) => s + i.qty, 0);
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Shift bar */}
       {!shift && (
         <div className="bg-yellow-900/30 border-b border-yellow-800/40 px-4 py-2 flex items-center justify-between shrink-0">
           <span className="text-yellow-400 text-xs flex items-center gap-1.5">
@@ -573,11 +548,9 @@ function POSPage() {
           <Btn size="sm" variant="mango" onClick={() => setShowShift(true)}>Open Shift</Btn>
         </div>
       )}
-
       <div className="flex flex-1 overflow-hidden">
-        {/* ─── LEFT: Menu panel ─────────────────────────────── */}
+        {/* Menu panel */}
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden border-r border-gray-800">
-          {/* Search + categories */}
           <div className="px-3 py-2 bg-gray-900 border-b border-gray-800 shrink-0">
             <div className="relative mb-2">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -595,7 +568,7 @@ function POSPage() {
                 style={activeCategory === 'all' ? { backgroundColor: MANGO } : {}}>
                 All
               </button>
-              {categories.map(c => (
+              {categories.map((c: Category) => (
                 <button key={c.id} onClick={() => setActiveCategory(c.id)}
                   className={clsx('shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-all',
                     activeCategory === c.id ? 'text-gray-900' : 'bg-gray-700 text-gray-400')}
@@ -605,8 +578,6 @@ function POSPage() {
               ))}
             </div>
           </div>
-
-          {/* Item grid */}
           <div className="flex-1 overflow-y-auto p-3">
             {menuLoading ? (
               <div className="flex items-center justify-center h-32">
@@ -616,33 +587,32 @@ function POSPage() {
               <div className="text-center text-gray-600 py-12">No items found</div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
-                {filteredItems.map(item => {
-                  const minPrice = Math.min(...item.sizes.map(s => s.price))
-                  return (
-                    <button key={item.id} onClick={() => handleItemTap(item)}
-                      className="bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-yellow-500/50
-                        rounded-xl p-3 text-left transition-all active:scale-95 flex flex-col gap-1">
-                      <div className="text-white font-medium text-sm leading-tight line-clamp-2">{item.name}</div>
-                      <div className="text-xs mt-auto" style={{ color: MANGO }}>
-                        {item.sizes.length > 1 ? `From ${fmt(minPrice)}` : fmt(minPrice)}
-                      </div>
-                      {item.sizes.length > 1 && (
-                        <div className="text-xs text-gray-600">{item.sizes.length} sizes</div>
-                      )}
-                    </button>
-                  )
-                })}
+{filteredItems.map((item: MenuItem) => {
+  const minPrice = Math.min(...item.sizes.map((s: ItemSize) => s.price));
+  return (
+    <button key={item.id} onClick={() => handleItemTap(item)}
+      className="bg-gray-800 hover:bg-gray-750 border border-gray-700 hover:border-yellow-500/50
+        rounded-xl p-3 text-left transition-all active:scale-95 flex flex-col gap-1">
+      <div className="text-white font-medium text-sm leading-tight line-clamp-2">{item.name}</div>
+      <div className="text-xs mt-auto" style={{ color: MANGO }}>
+        {item.sizes.length > 1 ? `From ${fmt(minPrice)}` : fmt(minPrice)}
+      </div>
+      {item.sizes.length > 1 && (
+        <div className="text-xs text-gray-600">{item.sizes.length} sizes</div>
+      )}
+    </button>
+  );
+})}
               </div>
             )}
           </div>
         </div>
 
-        {/* ─── RIGHT: Order panel ───────────────────────────── */}
+        {/* Order panel */}
         <div className="flex flex-col w-72 xl:w-80 shrink-0 bg-gray-900">
-          {/* Order type */}
           <div className="px-3 py-2 border-b border-gray-800 shrink-0">
             <div className="flex rounded-lg overflow-hidden border border-gray-700">
-              {(['dine_in', 'take_out'] as const).map(t => (
+              {(['dine_in', 'take_out'] as const).map((t: OrderType) => (
                 <button key={t} onClick={() => cart.setOrderType(t)}
                   className={clsx('flex-1 py-2 text-xs font-semibold transition-all',
                     cart.cart.order_type === t ? 'text-gray-900' : 'text-gray-400 hover:bg-gray-800')}
@@ -652,8 +622,6 @@ function POSPage() {
               ))}
             </div>
           </div>
-
-          {/* Cart items */}
           <div className="flex-1 overflow-y-auto px-2 py-2">
             {cart.cart.items.length === 0 ? (
               <div className="text-center text-gray-700 py-8 text-sm">
@@ -662,14 +630,12 @@ function POSPage() {
               </div>
             ) : (
               <div className="flex flex-col gap-1">
-                {cart.cart.items.map(item => (
+                {cart.cart.items.map((item: CartItem) => (
                   <CartItemRow key={item.cart_key} item={item} />
                 ))}
               </div>
             )}
           </div>
-
-          {/* Note field */}
           <div className="px-2 pb-1 shrink-0">
             <textarea
               value={cart.cart.note}
@@ -680,8 +646,6 @@ function POSPage() {
                 focus:outline-none focus:border-yellow-500 placeholder-gray-600 resize-none"
             />
           </div>
-
-          {/* Totals */}
           <div className="border-t border-gray-800 px-3 py-3 shrink-0 bg-gray-900">
             <div className="flex justify-between text-xs text-gray-400 mb-0.5">
               <span>Subtotal</span><span>{fmt(cart.subtotal())}</span>
@@ -715,15 +679,7 @@ function POSPage() {
         </div>
       </div>
 
-      // ============================================================
-// *** CONTINUATION OF src/App.tsx ***
-// Paste everything below directly after the `{/*` comment
-// at the end of the previous file fragment.
-// ============================================================
-
-      {/* ── Modals ──────────────────────────────────────────── */}
-
-      {/* Size / Addon picker */}
+      {/* Modals */}
       {sizeModal && (
         <SizePickerModal
           item={sizeModal.item}
@@ -731,44 +687,35 @@ function POSPage() {
           onAdd={addToCart}
         />
       )}
-
-      {/* Checkout */}
       {showCheckout && (
         <CheckoutModal
           shift={shift}
           onClose={() => setShowCheckout(false)}
-          onSuccess={() => { setShowCheckout(false); cart.clearCart() }}
+          onSuccess={() => { setShowCheckout(false); cart.clearCart(); }}
         />
       )}
-
-      {/* Held orders */}
       {showHeld && (
         <HeldOrdersModal
           onClose={() => setShowHeld(false)}
           onRestore={() => setShowHeld(false)}
         />
       )}
-
-      {/* Shift management */}
       {showShift && (
         <ShiftModal shift={shift ?? null} onClose={() => setShowShift(false)} />
       )}
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 7: CART ITEM ROW
-// ============================================================
+// ─── CartItemRow ────────────────────────────────────────
 
 function CartItemRow({ item }: { item: CartItem }) {
-  const cart = useCartStore()
-  const [expanded, setExpanded] = useState(false)
+  const cart = useCartStore();
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="bg-gray-800 rounded-lg overflow-hidden">
       <div className="flex items-center gap-2 px-2 py-2">
-        {/* Qty controls */}
         <div className="flex items-center gap-1 shrink-0">
           <button onClick={() => cart.updateQty(item.cart_key, -1)}
             className="w-6 h-6 rounded-md bg-gray-700 hover:bg-gray-600 flex items-center justify-center text-gray-300 transition-colors">
@@ -780,8 +727,6 @@ function CartItemRow({ item }: { item: CartItem }) {
             <Plus size={10} />
           </button>
         </div>
-
-        {/* Name */}
         <div className="flex-1 min-w-0">
           <div className="text-white text-xs font-medium truncate">{item.item_name}</div>
           {item.size_name && <div className="text-gray-500 text-xs">{item.size_name}</div>}
@@ -793,16 +738,12 @@ function CartItemRow({ item }: { item: CartItem }) {
             </button>
           )}
         </div>
-
-        {/* Price + discount + delete */}
         <div className="flex flex-col items-end gap-0.5 shrink-0">
           <span className="text-xs font-semibold" style={{ color: MANGO }}>{fmt(item.line_total)}</span>
           {item.discount_amount > 0 && (
             <span className="text-xs text-green-500">-{fmt(item.discount_amount)}</span>
           )}
         </div>
-
-        {/* Discount toggle */}
         <div className="flex flex-col gap-0.5 shrink-0">
           <button
             onClick={() => cart.setDiscount(item.cart_key, item.discount_type === 'sc' ? null : 'sc')}
@@ -817,17 +758,14 @@ function CartItemRow({ item }: { item: CartItem }) {
             PWD
           </button>
         </div>
-
         <button onClick={() => cart.removeItem(item.cart_key)}
           className="text-gray-700 hover:text-red-400 transition-colors shrink-0">
           <X size={14} />
         </button>
       </div>
-
-      {/* Add-ons detail */}
       {expanded && item.addons.length > 0 && (
         <div className="px-3 pb-2 border-t border-gray-700 pt-1.5">
-          {item.addons.map((a, i) => (
+          {item.addons.map((a: CartAddon, i: number) => (
             <div key={i} className="flex justify-between text-xs text-gray-500">
               <span>+ {a.addon_name} x{a.qty}</span>
               <span>{fmt(a.addon_price * a.qty)}</span>
@@ -836,40 +774,35 @@ function CartItemRow({ item }: { item: CartItem }) {
         </div>
       )}
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 8: SIZE + ADDON PICKER MODAL
-// ============================================================
+// ─── Size/Addon picker modal ────────────────────────────
 
 function SizePickerModal({
   item, onClose, onAdd,
 }: {
-  item: MenuItem
-  onClose: () => void
-  onAdd: (item: MenuItem, sizeName?: string, sizePrice?: number, addons?: Addon[]) => void
+  item: MenuItem; onClose: () => void; onAdd: (item: MenuItem, sizeName?: string, sizePrice?: number, addons?: Addon[]) => void
 }) {
-  const [selectedSize, setSelectedSize] = useState(item.sizes[0])
-  const [selectedAddons, setSelectedAddons] = useState<Addon[]>([])
+  const [selectedSize, setSelectedSize] = useState(item.sizes[0]);
+  const [selectedAddons, setSelectedAddons] = useState<Addon[]>([]);
 
   const toggleAddon = (addon: Addon) => {
     setSelectedAddons(prev =>
-      prev.some(a => a.id === addon.id) ? prev.filter(a => a.id !== addon.id) : [...prev, addon]
-    )
-  }
+      prev.some((a: Addon) => a.id === addon.id) ? prev.filter((a: Addon) => a.id !== addon.id) : [...prev, addon]
+    );
+  };
 
-  const availableAddons = item.addons.filter(a => a.is_available)
+  const availableAddons = item.addons.filter((a: Addon) => a.is_available);
 
   return (
     <Modal open onClose={onClose} title={item.name} maxWidth="max-w-sm">
       <div className="flex flex-col gap-4">
-        {/* Sizes */}
         {item.sizes.length > 0 && (
           <div>
             <p className="text-xs text-gray-400 font-medium mb-2">Size</p>
             <div className="flex flex-col gap-1.5">
-              {item.sizes.map(s => (
+              {item.sizes.map((s: ItemSize) => (
                 <button key={s.id} onClick={() => setSelectedSize(s)}
                   className={clsx(
                     'flex items-center justify-between px-3 py-2.5 rounded-lg border transition-all text-sm font-medium',
@@ -885,14 +818,12 @@ function SizePickerModal({
             </div>
           </div>
         )}
-
-        {/* Add-ons */}
         {availableAddons.length > 0 && (
           <div>
             <p className="text-xs text-gray-400 font-medium mb-2">Add-ons (optional)</p>
             <div className="flex flex-col gap-1.5">
-              {availableAddons.map(a => {
-                const active = selectedAddons.some(s => s.id === a.id)
+              {availableAddons.map((a: Addon) => {
+                const active = selectedAddons.some((s: Addon) => s.id === a.id);
                 return (
                   <button key={a.id} onClick={() => toggleAddon(a)}
                     className={clsx(
@@ -909,71 +840,64 @@ function SizePickerModal({
                     </span>
                     <span className="text-xs" style={active ? { color: MANGO } : {}}>+{fmt(a.price)}</span>
                   </button>
-                )
+                );
               })}
             </div>
           </div>
         )}
-
-        {/* Total preview */}
         <div className="flex items-center justify-between py-2 border-t border-gray-700">
           <span className="text-sm text-gray-400">Item Total</span>
           <span className="font-bold" style={{ color: MANGO }}>
-            {fmt((selectedSize?.price ?? 0) + selectedAddons.reduce((s, a) => s + a.price, 0))}
+            {fmt((selectedSize?.price ?? 0) + selectedAddons.reduce((s: number, a: Addon) => s + a.price, 0))}
           </span>
         </div>
-
         <Btn variant="mango" fullWidth onClick={() => onAdd(item, selectedSize?.name, selectedSize?.price, selectedAddons)}>
           <Plus size={16} /> Add to Order
         </Btn>
       </div>
     </Modal>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 9: CHECKOUT MODAL
-// ============================================================
+// ─── Checkout Modal ─────────────────────────────────────
 
 function CheckoutModal({ shift, onClose, onSuccess }: {
-  shift: Shift | null | undefined
-  onClose: () => void
-  onSuccess: () => void
+  shift: Shift | null | undefined; onClose: () => void; onSuccess: () => void
 }) {
-  const { user } = useAuthStore()
-  const cart = useCartStore()
-  const checkout = useCheckout()
+  const { user } = useAuthStore();
+  const cart = useCartStore();
+  const checkout = useCheckout();
+  const { data: settings } = useSettings();
 
-  const total = cart.total()
-  const [payments, setPayments] = useState<PaymentLine[]>([{ method: 'cash', amount: total }])
-  const [tendered, setTendered] = useState(total.toString())
-  const [step, setStep] = useState<'payment' | 'confirm' | 'success'>('payment')
-  const [result, setResult] = useState<{ receipt_number: string; change: number } | null>(null)
-  const [receiptData, setReceiptData] = useState<SaleDetail | null>(null)
-  const { data: settings } = useSettings()
+  const total = cart.total();
+  const [payments, setPayments] = useState<PaymentLine[]>([{ method: 'cash', amount: total }]);
+  const [tendered, setTendered] = useState(total.toString());
+  const [step, setStep] = useState<'payment' | 'confirm' | 'success'>('payment');
+  const [result, setResult] = useState<{ receipt_number: string; change: number } | null>(null);
+  const [receiptData, setReceiptData] = useState<SaleDetail | null>(null);
 
-  const paymentTotal = payments.reduce((s, p) => s + (p.amount || 0), 0)
-  const hasCash = payments.some(p => p.method === 'cash')
-  const tenderedNum = parseFloat(tendered) || 0
-  const change = hasCash ? Math.max(0, tenderedNum - total) : 0
-  const balanced = Math.abs(paymentTotal - total) < 0.01
+  const paymentTotal = payments.reduce((s: number, p: PaymentLine) => s + (p.amount || 0), 0);
+  const hasCash = payments.some((p: PaymentLine) => p.method === 'cash');
+  const tenderedNum = parseFloat(tendered) || 0;
+  const change = hasCash ? Math.max(0, tenderedNum - total) : 0;
+  const balanced = Math.abs(paymentTotal - total) < 0.01;
 
   const addPaymentLine = () => {
-    const used: PaymentMethod[] = payments.map(p => p.method)
-    const next = (['cash', 'gcash', 'maya'] as PaymentMethod[]).find(m => !used.includes(m))
-    if (!next) return
-    setPayments(prev => [...prev, { method: next, amount: 0 }])
-  }
+    const used: PaymentMethod[] = payments.map((p: PaymentLine) => p.method);
+    const next = (['cash', 'gcash', 'maya'] as PaymentMethod[]).find((m: PaymentMethod) => !used.includes(m));
+    if (!next) return;
+    setPayments(prev => [...prev, { method: next, amount: 0 }]);
+  };
 
   const updatePayment = (idx: number, field: 'method' | 'amount', val: string) => {
-    setPayments(prev => prev.map((p, i) => i === idx ? {
+    setPayments(prev => prev.map((p: PaymentLine, i: number) => i === idx ? {
       ...p,
       [field]: field === 'amount' ? parseFloat(val) || 0 : val,
-    } : p))
-  }
+    } : p));
+  };
 
   const handleCheckout = async () => {
-    if (!user) return
+    if (!user) return;
     try {
       const res = await checkout.mutateAsync({
         idempotency_key: cart.cart.idempotency_key,
@@ -981,7 +905,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
         order_type: cart.cart.order_type,
         note: cart.cart.note || undefined,
         tendered_amount: hasCash ? tenderedNum : undefined,
-        items: cart.cart.items.map(i => ({
+        items: cart.cart.items.map((i: CartItem) => ({
           item_id: i.item_id,
           item_name: i.item_name,
           size_name: i.size_name,
@@ -992,9 +916,8 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
           addons: i.addons,
         })),
         payments,
-      })
-      setResult({ receipt_number: res.receipt_number, change: res.change })
-      // Build local receipt data for print
+      });
+      setResult({ receipt_number: res.receipt_number, change: res.change });
       setReceiptData({
         id: '', receipt_number: res.receipt_number,
         cashier_id: user.id, cashier_name: user.name,
@@ -1004,23 +927,23 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
         shift_id: shift?.id ?? null, note: cart.cart.note || null,
         tendered_amount: hasCash ? tenderedNum : null,
         change_amount: res.change,
-        items: cart.cart.items.map(i => ({
+        items: cart.cart.items.map((i: CartItem) => ({
           id: '', item_name: i.item_name, size_name: i.size_name ?? null,
           base_price: i.base_price, qty: i.qty,
           discount_type: i.discount_type, discount_pct: i.discount_pct,
           discount_amount: i.discount_amount, addons_total: i.addons_total,
           final_price: i.line_total,
-          addons: i.addons.map(a => ({ addon_name: a.addon_name, addon_price: a.addon_price, qty: a.qty })),
+          addons: i.addons.map((a: CartAddon) => ({ addon_name: a.addon_name, addon_price: a.addon_price, qty: a.qty })),
         })),
         payments,
-      })
-      setStep('success')
+      });
+      setStep('success');
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : 'Checkout failed', 'error')
+      toast(e instanceof Error ? e.message : 'Checkout failed', 'error');
     }
-  }
+  };
 
-  const handlePrint = () => { window.print() }
+  const handlePrint = () => { window.print(); };
 
   return (
     <Modal open onClose={step === 'success' ? undefined : onClose}
@@ -1039,7 +962,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
           </div>
           {receiptData && settings && (
             <div className="border border-gray-700 rounded-xl overflow-hidden max-h-72 overflow-y-auto">
-              <Receipt sale={receiptData} settings={settings} />
+              <SaleReceipt sale={receiptData} settings={settings} />
             </div>
           )}
           <div className="flex gap-2">
@@ -1053,10 +976,9 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          {/* Order summary */}
           <div className="bg-gray-800 rounded-xl p-3">
             <div className="flex justify-between text-sm text-gray-400 mb-1">
-              <span>{cart.cart.items.reduce((s, i) => s + i.qty, 0)} item(s)</span>
+              <span>{cart.cart.items.reduce((s: number, i: CartItem) => s + i.qty, 0)} item(s)</span>
               <span>{cart.cart.order_type === 'dine_in' ? '🍽 Dine In' : '🥡 Take Out'}</span>
             </div>
             <div className="flex justify-between font-bold text-white text-lg">
@@ -1069,8 +991,6 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
               </div>
             )}
           </div>
-
-          {/* Payment lines */}
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-xs text-gray-400 font-medium">Payment</p>
@@ -1081,7 +1001,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
               )}
             </div>
             <div className="flex flex-col gap-2">
-              {payments.map((p, i) => (
+              {payments.map((p: PaymentLine, i: number) => (
                 <div key={i} className="flex gap-2 items-center">
                   <Select
                     value={p.method}
@@ -1099,15 +1019,13 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
                     className="flex-1"
                   />
                   {payments.length > 1 && (
-                    <button onClick={() => setPayments(prev => prev.filter((_, j) => j !== i))}
+                    <button onClick={() => setPayments(prev => prev.filter((_, j: number) => j !== i))}
                       className="text-gray-600 hover:text-red-400"><X size={14} /></button>
                   )}
                 </div>
               ))}
             </div>
           </div>
-
-          {/* Tendered (cash only) */}
           {hasCash && (
             <div>
               <Input label="Cash Tendered" type="number" value={tendered} min={0} step={0.01}
@@ -1118,9 +1036,8 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
                   <span className="text-green-400 font-semibold">{fmt(change)}</span>
                 </div>
               )}
-              {/* Quick tender buttons */}
               <div className="flex gap-1.5 mt-2 flex-wrap">
-                {[total, Math.ceil(total / 50) * 50, Math.ceil(total / 100) * 100, Math.ceil(total / 500) * 500].filter((v, i, a) => a.indexOf(v) === i).map(v => (
+                {[total, Math.ceil(total / 50) * 50, Math.ceil(total / 100) * 100, Math.ceil(total / 500) * 500].filter((v: number, i: number, a: number[]) => a.indexOf(v) === i).map((v: number) => (
                   <button key={v} onClick={() => setTendered(v.toString())}
                     className="px-2.5 py-1 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs text-gray-300 transition-colors">
                     {fmt(v)}
@@ -1129,19 +1046,16 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
               </div>
             </div>
           )}
-
-          {/* Balance indicator */}
           {!balanced && (
             <div className="flex items-center justify-between text-sm p-2 bg-red-900/20 border border-red-800/30 rounded-lg">
               <span className="text-red-400">Remaining</span>
               <span className="text-red-400 font-medium">{fmt(total - paymentTotal)}</span>
             </div>
           )}
-
           <div className="flex gap-2">
             <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
             <Btn variant="mango" onClick={handleCheckout}
-              disabled={!balanced || (hasCash && tenderedNum < payments.filter(p => p.method === 'cash').reduce((s, p) => s + p.amount, 0))}
+              disabled={!balanced || (hasCash && tenderedNum < payments.filter((p: PaymentLine) => p.method === 'cash').reduce((s: number, p: PaymentLine) => s + p.amount, 0))}
               loading={checkout.isPending} className="flex-2 flex-1">
               Confirm Sale
             </Btn>
@@ -1149,39 +1063,36 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
         </div>
       )}
     </Modal>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 10: HELD ORDERS MODAL
-// ============================================================
+// ─── Held Orders Modal ──────────────────────────────────
 
 function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestore: () => void }) {
-  const { data: heldOrders, isLoading } = useHeldOrders()
-  const createHeld = useCreateHeldOrder()
-  const deleteHeld = useDeleteHeldOrder()
-  const cart = useCartStore()
-  const { user } = useAuthStore()
-  const [label, setLabel] = useState('')
+  const { data: heldOrders, isLoading } = useHeldOrders();
+  const createHeld = useCreateHeldOrder();
+  const deleteHeld = useDeleteHeldOrder();
+  const cart = useCartStore();
+  const { user } = useAuthStore();
+  const [label, setLabel] = useState('');
 
   const handleHold = async () => {
-    if (cart.cart.items.length === 0) return
-    await createHeld.mutateAsync({ data: cart.cart, label: label || undefined })
-    cart.clearCart()
-    toast('Order held')
-    onClose()
-  }
+    if (cart.cart.items.length === 0) return;
+    await createHeld.mutateAsync({ data: cart.cart, label: label || undefined });
+    cart.clearCart();
+    toast('Order held');
+    onClose();
+  };
 
   const handleRestore = (order: HeldOrder) => {
-    cart.loadFromHeld(order.data)
-    deleteHeld.mutate(order.id)
-    onRestore()
-  }
+    cart.loadFromHeld(order.data);
+    deleteHeld.mutate(order.id);
+    onRestore();
+  };
 
   return (
     <Modal open onClose={onClose} title="📋 Held Orders" maxWidth="max-w-md">
       <div className="flex flex-col gap-4">
-        {/* Hold current order */}
         {cart.cart.items.length > 0 && (
           <div className="bg-gray-800 rounded-xl p-3">
             <p className="text-sm text-gray-300 mb-2 font-medium">Hold Current Order ({cart.cart.items.length} items)</p>
@@ -1191,8 +1102,6 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
             </div>
           </div>
         )}
-
-        {/* Held list */}
         <div>
           <p className="text-xs text-gray-500 mb-2">Held orders expire in 1 hour</p>
           {isLoading ? (
@@ -1201,12 +1110,12 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
             <div className="text-center text-gray-600 py-6 text-sm">No held orders</div>
           ) : (
             <div className="flex flex-col gap-2">
-              {heldOrders.map(order => (
+              {heldOrders.map((order: HeldOrder) => (
                 <div key={order.id} className="flex items-center justify-between bg-gray-800 rounded-xl px-3 py-2.5">
                   <div>
                     <div className="text-white text-sm font-medium">{order.label ?? 'Unnamed Order'}</div>
                     <div className="text-gray-500 text-xs">
-                      {order.data.items.length} items · {fmt(order.data.items.reduce((s, i) => s + i.line_total, 0))}
+                      {order.data.items.length} items · {fmt(order.data.items.reduce((s: number, i: CartItem) => s + i.line_total, 0))}
                     </div>
                     <div className="text-gray-600 text-xs">
                       Expires {fmtDate(order.expires_at)}
@@ -1225,51 +1134,49 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
         </div>
       </div>
     </Modal>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 11: SHIFT MODAL
-// ============================================================
+// ─── Shift Modal ────────────────────────────────────────
 
 function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => void }) {
-  const { user } = useAuthStore()
-  const openPinModal = useUIStore(s => s.openPinModal)
-  const openShift = useOpenShift()
-  const closeShift = useCloseShift()
-  const cashDrop = useCashDrop()
+  const { user } = useAuthStore();
+  const openPinModal = useUIStore(s => s.openPinModal);
+  const openShift = useOpenShift();
+  const closeShift = useCloseShift();
+  const cashDrop = useCashDrop();
 
-  const [startFloat, setStartFloat] = useState('0')
-  const [closingCash, setClosingCash] = useState('')
-  const [closeNotes, setCloseNotes] = useState('')
-  const [dropAmount, setDropAmount] = useState('')
-  const [dropReason, setDropReason] = useState('')
-  const [tab, setTab] = useState<'overview' | 'close' | 'drop'>('overview')
+  const [startFloat, setStartFloat] = useState('0');
+  const [closingCash, setClosingCash] = useState('');
+  const [closeNotes, setCloseNotes] = useState('');
+  const [dropAmount, setDropAmount] = useState('');
+  const [dropReason, setDropReason] = useState('');
+  const [tab, setTab] = useState<'overview' | 'close' | 'drop'>('overview');
 
   const handleOpen = async () => {
-    const ok = await openPinModal({ required_role: 'admin' })
-    if (!ok) return
-    await openShift.mutateAsync({ starting_float: parseFloat(startFloat) || 0 })
-    toast('Shift opened')
-    onClose()
-  }
+    const ok = await openPinModal({ required_role: 'admin' });
+    if (!ok) return;
+    await openShift.mutateAsync({ starting_float: parseFloat(startFloat) || 0 });
+    toast('Shift opened');
+    onClose();
+  };
 
   const handleClose = async () => {
-    if (!shift) return
-    const ok = await openPinModal({ required_role: 'admin' })
-    if (!ok) return
-    await closeShift.mutateAsync({ id: shift.id, closing_cash: parseFloat(closingCash) || 0, notes: closeNotes })
-    toast('Shift closed')
-    onClose()
-  }
+    if (!shift) return;
+    const ok = await openPinModal({ required_role: 'admin' });
+    if (!ok) return;
+    await closeShift.mutateAsync({ id: shift.id, closing_cash: parseFloat(closingCash) || 0, notes: closeNotes });
+    toast('Shift closed');
+    onClose();
+  };
 
   const handleDrop = async () => {
-    if (!shift || !dropReason) return
-    await cashDrop.mutateAsync({ shift_id: shift.id, amount: parseFloat(dropAmount) || 0, reason: dropReason })
-    toast('Cash drop recorded')
-    setDropAmount(''); setDropReason('')
-    onClose()
-  }
+    if (!shift || !dropReason) return;
+    await cashDrop.mutateAsync({ shift_id: shift.id, amount: parseFloat(dropAmount) || 0, reason: dropReason });
+    toast('Cash drop recorded');
+    setDropAmount(''); setDropReason('');
+    onClose();
+  };
 
   if (!shift) {
     return (
@@ -1286,18 +1193,17 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
           </div>
         </div>
       </Modal>
-    )
+    );
   }
 
-  const cashTotal = (shift.payment_totals?.cash ?? 0)
-  const expectedCash = (shift.starting_float ?? 0) + cashTotal - (shift.cash_drops ?? []).reduce((s, d) => s + d.amount, 0)
-  const variance = parseFloat(closingCash || '0') - expectedCash
+  const cashTotal = (shift.payment_totals?.cash ?? 0);
+  const expectedCash = (shift.starting_float ?? 0) + cashTotal - (shift.cash_drops ?? []).reduce((s: number, d: CashDrop) => s + d.amount, 0);
+  const variance = parseFloat(closingCash || '0') - expectedCash;
 
   return (
     <Modal open onClose={onClose} title="📊 Shift Management" maxWidth="max-w-md">
-      {/* Tabs */}
       <div className="flex gap-1 mb-4 bg-gray-800 p-1 rounded-xl">
-        {(['overview', 'drop', 'close'] as const).map(t => (
+        {(['overview', 'drop', 'close'] as const).map((t: 'overview' | 'drop' | 'close') => (
           <button key={t} onClick={() => setTab(t)}
             className={clsx('flex-1 py-1.5 rounded-lg text-xs font-medium capitalize transition-all',
               tab === t ? 'text-gray-900 bg-yellow-400' : 'text-gray-400 hover:text-gray-200')}>
@@ -1311,15 +1217,15 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
           <div className="grid grid-cols-2 gap-2">
             <StatCard label="Starting Float" value={fmt(shift.starting_float)} />
             <StatCard label="Cash Sales" value={fmt(cashTotal)} />
-            {Object.entries(shift.payment_totals ?? {}).filter(([k]) => k !== 'cash').map(([k, v]) => (
-              <StatCard key={k} label={k.toUpperCase()} value={fmt(v)} />
-            ))}
+           {(Object.entries(shift.payment_totals ?? {}) as [string, number][]).filter(([k]) => k !== 'cash').map(([k, v]) => (
+  <StatCard key={k} label={k.toUpperCase()} value={fmt(v)} />
+))}
             <StatCard label="Expected Cash" value={fmt(expectedCash)} />
           </div>
           {(shift.cash_drops ?? []).length > 0 && (
             <div>
               <p className="text-xs text-gray-500 mb-1">Cash Drops</p>
-              {shift.cash_drops.map(d => (
+              {shift.cash_drops.map((d: CashDrop) => (
                 <div key={d.id} className="flex justify-between text-xs text-gray-400 py-1 border-b border-gray-800">
                   <span>{d.reason}</span><span className="text-red-400">-{fmt(d.amount)}</span>
                 </div>
@@ -1370,7 +1276,7 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
         </div>
       )}
     </Modal>
-  )
+  );
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
@@ -1379,66 +1285,63 @@ function StatCard({ label, value }: { label: string; value: string }) {
       <div className="text-xs text-gray-500 mb-1">{label}</div>
       <div className="text-white font-bold">{value}</div>
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 12: SALES PAGE
-// ============================================================
+// ─── Sales Page ─────────────────────────────────────────
 
 function SalesPage() {
-  const { user } = useAuthStore()
-  const openPinModal = useUIStore(s => s.openPinModal)
-  const [dateFrom, setDateFrom] = useState(new Date().toISOString().slice(0, 10))
-  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10))
-  const [statusFilter, setStatusFilter] = useState('')
-  const [receiptQ, setReceiptQ] = useState('')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [reasonModal, setReasonModal] = useState<{ action: 'void' | 'refund' | 'delete'; saleId: string } | null>(null)
-  const [reason, setReason] = useState('')
+  const { user } = useAuthStore();
+  const openPinModal = useUIStore(s => s.openPinModal);
+  const [dateFrom, setDateFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
+  const [statusFilter, setStatusFilter] = useState('');
+  const [receiptQ, setReceiptQ] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [reasonModal, setReasonModal] = useState<{ action: 'void' | 'refund' | 'delete'; saleId: string } | null>(null);
+  const [reason, setReason] = useState('');
 
   const { data: sales, isLoading, refetch } = useSales({
     date_from: dateFrom, date_to: dateTo,
     status: statusFilter || undefined,
     receipt: receiptQ || undefined,
-  })
-  const { data: saleDetail } = useSaleDetail(selectedId)
-  const { data: settings } = useSettings()
-  const voidSale = useVoidSale()
-  const refundSale = useRefundSale()
-  const softDelete = useSoftDeleteSale()
-  const reprint = useReprintSale()
+  });
+  const { data: saleDetail } = useSaleDetail(selectedId);
+  const { data: settings } = useSettings();
+  const voidSale = useVoidSale();
+  const refundSale = useRefundSale();
+  const softDelete = useSoftDeleteSale();
+  const reprint = useReprintSale();
 
   const handleAction = async () => {
-    if (!reasonModal || !reason) return
-    const { action, saleId } = reasonModal
-    const ok = await openPinModal({ required_role: 'admin' })
-    if (!ok) return
+    if (!reasonModal || !reason) return;
+    const { action, saleId } = reasonModal;
+    const ok = await openPinModal({ required_role: 'admin' });
+    if (!ok) return;
     try {
-      if (action === 'void') await voidSale.mutateAsync({ id: saleId, reason })
-      if (action === 'refund') await refundSale.mutateAsync({ id: saleId, reason })
-      if (action === 'delete') await softDelete.mutateAsync({ id: saleId, reason })
-      toast(`Sale ${action}ed`)
-      setReasonModal(null); setReason(''); setSelectedId(null); refetch()
+      if (action === 'void') await voidSale.mutateAsync({ id: saleId, reason });
+      if (action === 'refund') await refundSale.mutateAsync({ id: saleId, reason });
+      if (action === 'delete') await softDelete.mutateAsync({ id: saleId, reason });
+      toast(`Sale ${action}ed`);
+      setReasonModal(null); setReason(''); setSelectedId(null); refetch();
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : 'Action failed', 'error')
+      toast(e instanceof Error ? e.message : 'Action failed', 'error');
     }
-  }
+  };
 
   const handleReprint = async (id: string) => {
-    const ok = await openPinModal()
-    if (!ok) return
-    await reprint.mutateAsync(id)
-    toast('Reprint recorded')
-    window.print()
-  }
+    const ok = await openPinModal();
+    if (!ok) return;
+    await reprint.mutateAsync(id);
+    toast('Reprint recorded');
+    window.print();
+  };
 
   const statusColor = (s: string) =>
-    s === 'completed' ? 'green' : s === 'voided' ? 'red' : s === 'refunded' ? 'yellow' : 'gray'
+    s === 'completed' ? 'green' : s === 'voided' ? 'red' : s === 'refunded' ? 'yellow' : 'gray';
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Filters */}
       <div className="px-4 py-3 bg-gray-900 border-b border-gray-800 shrink-0 flex flex-wrap gap-2 items-end">
         <Input label="From" type="date" value={dateFrom} onChange={setDateFrom} className="w-36" />
         <Input label="To" type="date" value={dateTo} onChange={setDateTo} className="w-36" />
@@ -1453,14 +1356,12 @@ function SalesPage() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sales list */}
         <div className="flex flex-col flex-1 overflow-hidden border-r border-gray-800">
-          {/* Summary bar */}
           {sales && (
             <div className="px-4 py-2 bg-gray-900/50 border-b border-gray-800 flex gap-4 text-xs text-gray-500 shrink-0">
               <span>{sales.length} transactions</span>
               <span className="text-green-400">
-                {fmt(sales.filter(s => s.status === 'completed').reduce((a, s) => a + s.total, 0))} revenue
+                {fmt(sales.filter((s: SaleListItem) => s.status === 'completed').reduce((a: number, s: SaleListItem) => a + s.total, 0))} revenue
               </span>
             </div>
           )}
@@ -1470,7 +1371,7 @@ function SalesPage() {
             ) : !sales?.length ? (
               <div className="text-center text-gray-600 py-12">No sales found</div>
             ) : (
-              sales.map(sale => (
+              sales.map((sale: SaleListItem) => (
                 <button key={sale.id} onClick={() => setSelectedId(s => s === sale.id ? null : sale.id)}
                   className={clsx(
                     'w-full flex items-center gap-3 px-4 py-3 border-b border-gray-800 text-left transition-all hover:bg-gray-800/50',
@@ -1499,7 +1400,6 @@ function SalesPage() {
           </div>
         </div>
 
-        {/* Sale detail panel */}
         {saleDetail && (
           <div className="w-80 xl:w-96 shrink-0 flex flex-col overflow-hidden bg-gray-900">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
@@ -1515,17 +1415,15 @@ function SalesPage() {
                 )}
               </div>
             </div>
-
             <div className="flex-1 overflow-y-auto p-4">
-              {/* Items */}
               <div className="space-y-2 mb-4">
-                {saleDetail.items.map((item, i) => (
+                {saleDetail.items.map((item: SaleItemDetail, i: number) => (
                   <div key={i} className="text-sm">
                     <div className="flex justify-between text-white">
                       <span>{item.qty}x {item.item_name}{item.size_name ? ` (${item.size_name})` : ''}</span>
                       <span>{fmt(item.final_price)}</span>
                     </div>
-                    {item.addons.map((a, j) => (
+                    {item.addons.map((a: { addon_name: string; addon_price: number; qty: number }, j: number) => (
                       <div key={j} className="flex justify-between text-xs text-gray-500 pl-3">
                         <span>+ {a.addon_name}</span><span>{fmt(a.addon_price)}</span>
                       </div>
@@ -1539,8 +1437,6 @@ function SalesPage() {
                   </div>
                 ))}
               </div>
-
-              {/* Totals */}
               <div className="border-t border-gray-700 pt-3 space-y-1">
                 <div className="flex justify-between text-sm text-gray-400">
                   <span>Subtotal</span><span>{fmt(saleDetail.subtotal)}</span>
@@ -1553,7 +1449,7 @@ function SalesPage() {
                 <div className="flex justify-between font-bold text-white">
                   <span>Total</span><span style={{ color: MANGO }}>{fmt(saleDetail.total)}</span>
                 </div>
-                {saleDetail.payments.map((p, i) => (
+                {saleDetail.payments.map((p: PaymentLine, i: number) => (
                   <div key={i} className="flex justify-between text-sm text-gray-400">
                     <span>{p.method.toUpperCase()}</span><span>{fmt(p.amount)}</span>
                   </div>
@@ -1564,28 +1460,24 @@ function SalesPage() {
                   </div>
                 )}
               </div>
-
-              {/* Print preview */}
               {settings && (
                 <div className="mt-4 border border-gray-700 rounded-xl overflow-hidden">
-                  <Receipt sale={saleDetail} settings={settings} />
+                  <SaleReceipt sale={saleDetail} settings={settings} />
                 </div>
               )}
             </div>
-
-            {/* Admin actions */}
             {user?.role === 'admin' && saleDetail.status === 'completed' && (
               <div className="border-t border-gray-800 p-3 flex gap-2 shrink-0">
                 <Btn size="sm" variant="secondary" className="flex-1"
-                  onClick={() => { setReasonModal({ action: 'void', saleId: saleDetail.id }); setReason('') }}>
+                  onClick={() => { setReasonModal({ action: 'void', saleId: saleDetail.id }); setReason(''); }}>
                   Void
                 </Btn>
                 <Btn size="sm" variant="secondary" className="flex-1"
-                  onClick={() => { setReasonModal({ action: 'refund', saleId: saleDetail.id }); setReason('') }}>
+                  onClick={() => { setReasonModal({ action: 'refund', saleId: saleDetail.id }); setReason(''); }}>
                   Refund
                 </Btn>
                 <Btn size="sm" variant="danger"
-                  onClick={() => { setReasonModal({ action: 'delete', saleId: saleDetail.id }); setReason('') }}>
+                  onClick={() => { setReasonModal({ action: 'delete', saleId: saleDetail.id }); setReason(''); }}>
                   <Trash2 size={13} />
                 </Btn>
               </div>
@@ -1594,7 +1486,6 @@ function SalesPage() {
         )}
       </div>
 
-      {/* Reason modal */}
       <Modal open={!!reasonModal} onClose={() => setReasonModal(null)}
         title={`${reasonModal?.action === 'void' ? 'Void' : reasonModal?.action === 'refund' ? 'Refund' : 'Delete'} Sale`}>
         <div className="flex flex-col gap-3">
@@ -1607,45 +1498,42 @@ function SalesPage() {
         </div>
       </Modal>
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 13: EMPLOYEE PAGE (Time Logs + Clock In/Out)
-// ============================================================
+// ─── Employee Page (Time Logs) ─────────────────────────
 
 function EmployeePage() {
-  const { user } = useAuthStore()
-  const clockIn = useClockIn()
-  const clockOut = useClockOut()
-  const { data: logs, isLoading, refetch } = useTimeLogs()
+  const { user } = useAuthStore();
+  const clockIn = useClockIn();
+  const clockOut = useClockOut();
+  const { data: logs, isLoading, refetch } = useTimeLogs();
 
-  const myLogs = logs?.filter(l => l.user_id === user?.id) ?? []
-  const openLog = myLogs.find(l => !l.clock_out)
+  const myLogs = logs?.filter((l: TimeLog) => l.user_id === user?.id) ?? [];
+  const openLog = myLogs.find((l: TimeLog) => !l.clock_out);
 
-  const totalMins = myLogs.filter(l => l.clock_out).reduce((s, l) => {
-    return s + differenceInMinutes(parseISO(l.clock_out!), parseISO(l.clock_in))
-  }, 0)
+  const totalMins = myLogs.filter((l: TimeLog) => l.clock_out).reduce((s: number, l: TimeLog) => {
+    return s + differenceInMinutes(parseISO(l.clock_out!), parseISO(l.clock_in));
+  }, 0);
 
   const handleClock = async () => {
     try {
       if (openLog) {
-        await clockOut.mutateAsync()
-        toast('Clocked out')
+        await clockOut.mutateAsync();
+        toast('Clocked out');
       } else {
-        await clockIn.mutateAsync()
-        toast('Clocked in')
+        await clockIn.mutateAsync();
+        toast('Clocked in');
       }
-      refetch()
+      refetch();
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : 'Error', 'error')
+      toast(e instanceof Error ? e.message : 'Error', 'error');
     }
-  }
+  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex-1 overflow-y-auto p-4 max-w-2xl mx-auto w-full">
-        {/* Status card */}
         <div className={clsx('rounded-2xl p-6 mb-6 border flex items-center justify-between',
           openLog ? 'bg-green-900/20 border-green-800/40' : 'bg-gray-800 border-gray-700')}>
           <div>
@@ -1669,14 +1557,10 @@ function EmployeePage() {
             {openLog ? 'Clock Out' : 'Clock In'}
           </Btn>
         </div>
-
-        {/* Summary */}
         <div className="grid grid-cols-2 gap-3 mb-6">
           <StatCard label="Total Hours (All Time)" value={`${(totalMins / 60).toFixed(1)}h`} />
-          <StatCard label="Sessions" value={String(myLogs.filter(l => l.clock_out).length)} />
+          <StatCard label="Sessions" value={String(myLogs.filter((l: TimeLog) => l.clock_out).length)} />
         </div>
-
-        {/* Time log history */}
         <div>
           <h3 className="text-sm font-semibold text-gray-300 mb-3">My Time Log</h3>
           {isLoading ? (
@@ -1685,10 +1569,10 @@ function EmployeePage() {
             <div className="text-center text-gray-600 py-8">No time logs yet</div>
           ) : (
             <div className="flex flex-col gap-2">
-              {myLogs.map(log => {
+              {myLogs.map((log: TimeLog) => {
                 const mins = log.clock_out
                   ? differenceInMinutes(parseISO(log.clock_out), parseISO(log.clock_in))
-                  : null
+                  : null;
                 return (
                   <div key={log.id} className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
                     <div className="flex items-center justify-between">
@@ -1711,55 +1595,48 @@ function EmployeePage() {
                       )}
                     </div>
                   </div>
-                )
+                );
               })}
             </div>
           )}
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 14: ADMIN DASHBOARD
-// ============================================================
+// ─── Admin Dashboard ────────────────────────────────────
 
 function AdminDashboardPage() {
-  const [dateFrom, setDateFrom] = useState(new Date().toISOString().slice(0, 10))
-  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10))
-  const { data: report, isLoading } = useSalesReport({ date_from: dateFrom, date_to: dateTo })
-  const { data: hoursReport } = useWorkHoursReport({ date_from: dateFrom, date_to: dateTo })
-  const { data: shift } = useCurrentShift()
-  const { navigate } = useUIStore()
+  const [dateFrom, setDateFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
+  const { data: report, isLoading } = useSalesReport({ date_from: dateFrom, date_to: dateTo });
+  const { data: hoursReport } = useWorkHoursReport({ date_from: dateFrom, date_to: dateTo });
+  const { data: shift } = useCurrentShift();
+  const { navigate } = useUIStore();
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Date filters */}
       <div className="px-4 py-3 bg-gray-900 border-b border-gray-800 shrink-0 flex gap-2 items-end flex-wrap">
         <Input label="From" type="date" value={dateFrom} onChange={setDateFrom} className="w-36" />
         <Input label="To" type="date" value={dateTo} onChange={setDateTo} className="w-36" />
       </div>
-
       <div className="flex-1 overflow-y-auto p-4">
         {isLoading ? (
           <div className="flex justify-center py-16"><RefreshCw className="animate-spin text-gray-500" /></div>
         ) : (
           <div className="max-w-4xl mx-auto flex flex-col gap-6">
-            {/* KPI cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <KpiCard icon={<DollarSign size={18} />} label="Revenue" value={fmt(report?.total_revenue ?? 0)} color="green" />
               <KpiCard icon={<Receipt size={18} />} label="Transactions" value={String(report?.transaction_count ?? 0)} color="blue" />
               <KpiCard icon={<TrendingUp size={18} />} label="Avg Sale" value={fmt(report?.transaction_count ? (report.total_revenue / report.transaction_count) : 0)} color="yellow" />
               <KpiCard icon={<Star size={18} />} label="Discounts" value={fmt(report?.total_discount ?? 0)} color="red" />
             </div>
-
-            {/* Payment breakdown */}
             <div className="bg-gray-800 border border-gray-700 rounded-2xl p-4">
               <h3 className="text-sm font-semibold text-gray-300 mb-3">Payment Methods</h3>
               <div className="flex flex-col gap-2">
-                {Object.entries(report?.payment_breakdown ?? {}).map(([method, amount]) => {
-                  const pct = report?.total_revenue ? (amount / report.total_revenue) * 100 : 0
+                {(Object.entries(report?.payment_breakdown ?? {}) as [string, number][]).map(([method, amount]) => {
+                  const pct = report?.total_revenue ? (amount / report.total_revenue) * 100 : 0;
                   return (
                     <div key={method}>
                       <div className="flex justify-between text-sm mb-1">
@@ -1771,15 +1648,13 @@ function AdminDashboardPage() {
                           style={{ width: `${pct}%`, backgroundColor: method === 'cash' ? '#22c55e' : method === 'gcash' ? MANGO : '#60a5fa' }} />
                       </div>
                     </div>
-                  )
+                  );
                 })}
                 {!Object.keys(report?.payment_breakdown ?? {}).length && (
                   <p className="text-gray-600 text-sm">No payment data</p>
                 )}
               </div>
             </div>
-
-            {/* Shift status */}
             <div className="bg-gray-800 border border-gray-700 rounded-2xl p-4">
               <h3 className="text-sm font-semibold text-gray-300 mb-3">Current Shift</h3>
               {shift ? (
@@ -1792,13 +1667,11 @@ function AdminDashboardPage() {
                 <p className="text-gray-600 text-sm">No shift currently open.</p>
               )}
             </div>
-
-            {/* Work hours summary */}
             {hoursReport?.summary.length ? (
               <div className="bg-gray-800 border border-gray-700 rounded-2xl p-4">
                 <h3 className="text-sm font-semibold text-gray-300 mb-3">Work Hours Summary</h3>
                 <div className="flex flex-col gap-2">
-                  {hoursReport.summary.map(u => (
+                  {hoursReport.summary.map((u: { user_id: string; user_name: string; total_hours: number; estimated_salary: number }) => (
                     <div key={u.user_id} className="flex items-center justify-between py-2 border-b border-gray-700 last:border-0">
                       <div>
                         <div className="text-white text-sm font-medium">{u.user_name}</div>
@@ -1813,8 +1686,6 @@ function AdminDashboardPage() {
                 </div>
               </div>
             ) : null}
-
-            {/* Quick links */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               {([
                 { label: 'Manage Menu', page: 'admin_menu' as Page, icon: <Coffee size={16} /> },
@@ -1822,7 +1693,7 @@ function AdminDashboardPage() {
                 { label: 'Inventory', page: 'admin_inventory' as Page, icon: <Package size={16} /> },
                 { label: 'Settings', page: 'admin_settings' as Page, icon: <Settings size={16} /> },
                 { label: 'Audit Log', page: 'admin_audit' as Page, icon: <ShieldCheck size={16} /> },
-              ] as { label: string; page: Page; icon: React.ReactNode }[]).map(l => (
+              ] as { label: string; page: Page; icon: React.ReactNode }[]).map((l: { label: string; page: Page; icon: React.ReactNode }) => (
                 <button key={l.page} onClick={() => navigate(l.page)}
                   className="flex items-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-750 border border-gray-700
                     hover:border-yellow-500/40 rounded-xl text-gray-300 text-sm font-medium transition-all text-left">
@@ -1834,7 +1705,7 @@ function AdminDashboardPage() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value: string; color: string }) {
@@ -1843,7 +1714,7 @@ function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: 
     blue: 'text-blue-400 bg-blue-900/20',
     yellow: 'text-yellow-400 bg-yellow-900/20',
     red: 'text-red-400 bg-red-900/20',
-  }
+  };
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-2xl p-4">
       <div className={clsx('w-8 h-8 rounded-lg flex items-center justify-center mb-2', colors[color])}>
@@ -1852,73 +1723,66 @@ function KpiCard({ icon, label, value, color }: { icon: React.ReactNode; label: 
       <div className="text-xs text-gray-500 mb-0.5">{label}</div>
       <div className="text-white font-bold text-lg">{value}</div>
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 15: ADMIN MENU PAGE
-// ============================================================
+// ─── Admin Menu Page ────────────────────────────────────
 
 function AdminMenuPage() {
-  const { data: menuData, isLoading } = useMenu()
-  const createCategory = useCreateCategory()
-  const createItem = useCreateMenuItem()
-  const updateItem = useUpdateMenuItem()
-  const deleteItem = useDeleteMenuItem()
-  const toggleAvailability = useToggleAvailability()
-  const createAddon = useCreateAddon()
-  const updateAddon = useUpdateAddon()
+  const { data: menuData, isLoading } = useMenu();
+  const createCategory = useCreateCategory();
+  const createItem = useCreateMenuItem();
+  const updateItem = useUpdateMenuItem();
+  const deleteItem = useDeleteMenuItem();
+  const toggleAvailability = useToggleAvailability();
+  const createAddon = useCreateAddon();
+  const updateAddon = useUpdateAddon();
 
-  const [tab, setTab] = useState<'items' | 'addons'>('items')
-  const [newCatName, setNewCatName] = useState('')
-  const [editingItem, setEditingItem] = useState<string | null>(null)
+  const [tab, setTab] = useState<'items' | 'addons'>('items');
+  const [newCatName, setNewCatName] = useState('');
+  const [editingItem, setEditingItem] = useState<string | null>(null);
+  const [newItem, setNewItem] = useState({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }], addon_ids: [] as string[] });
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [newAddon, setNewAddon] = useState({ name: '', price: '' });
+  const [showAddAddon, setShowAddAddon] = useState(false);
 
-  // Add item form
-  const [newItem, setNewItem] = useState({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }], addon_ids: [] as string[] })
-  const [showAddItem, setShowAddItem] = useState(false)
-
-  // Add addon form
-  const [newAddon, setNewAddon] = useState({ name: '', price: '' })
-  const [showAddAddon, setShowAddAddon] = useState(false)
-
-  const categories = menuData?.categories ?? []
-  const allAddons = menuData?.addons ?? []
+  const categories = menuData?.categories ?? [];
+  const allAddons = menuData?.addons ?? [];
 
   const handleAddCategory = async () => {
-    if (!newCatName.trim()) return
-    await createCategory.mutateAsync({ name: newCatName, sort_order: categories.length })
-    setNewCatName('')
-    toast('Category added')
-  }
+    if (!newCatName.trim()) return;
+    await createCategory.mutateAsync({ name: newCatName, sort_order: categories.length });
+    setNewCatName('');
+    toast('Category added');
+  };
 
   const handleAddItem = async () => {
-    const sizes = newItem.sizes.filter(s => s.name && s.price).map(s => ({ name: s.name, price: parseFloat(s.price) }))
-    if (!newItem.name || !sizes.length) return
+    const sizes = newItem.sizes.filter((s: { name: string; price: string }) => s.name && s.price).map((s: { name: string; price: string }) => ({ name: s.name, price: parseFloat(s.price) }));
+    if (!newItem.name || !sizes.length) return;
     await createItem.mutateAsync({
       name: newItem.name,
       category_id: newItem.category_id || undefined,
       sizes,
       addon_ids: newItem.addon_ids,
-    })
-    setNewItem({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }], addon_ids: [] })
-    setShowAddItem(false)
-    toast('Item added')
-  }
+    });
+    setNewItem({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }], addon_ids: [] });
+    setShowAddItem(false);
+    toast('Item added');
+  };
 
   const handleAddAddon = async () => {
-    if (!newAddon.name || !newAddon.price) return
-    await createAddon.mutateAsync({ name: newAddon.name, price: parseFloat(newAddon.price) })
-    setNewAddon({ name: '', price: '' })
-    setShowAddAddon(false)
-    toast('Add-on added')
-  }
+    if (!newAddon.name || !newAddon.price) return;
+    await createAddon.mutateAsync({ name: newAddon.name, price: parseFloat(newAddon.price) });
+    setNewAddon({ name: '', price: '' });
+    setShowAddAddon(false);
+    toast('Add-on added');
+  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Tabs */}
       <div className="px-4 py-3 bg-gray-900 border-b border-gray-800 shrink-0 flex items-center gap-2">
         <div className="flex bg-gray-800 p-1 rounded-xl gap-1 flex-1 max-w-xs">
-          {(['items', 'addons'] as const).map(t => (
+          {(['items', 'addons'] as const).map((t: 'items' | 'addons') => (
             <button key={t} onClick={() => setTab(t)}
               className={clsx('flex-1 py-1.5 rounded-lg text-xs font-medium capitalize transition-all',
                 tab === t ? 'text-gray-900 bg-yellow-400' : 'text-gray-400')}>
@@ -1936,7 +1800,6 @@ function AdminMenuPage() {
           <div className="flex justify-center py-12"><RefreshCw className="animate-spin text-gray-600" /></div>
         ) : tab === 'items' ? (
           <div className="max-w-3xl mx-auto space-y-6">
-            {/* Add category inline */}
             <div className="flex gap-2">
               <Input value={newCatName} onChange={setNewCatName} placeholder="New category name…" className="flex-1" />
               <Btn variant="secondary" onClick={handleAddCategory} disabled={!newCatName.trim()}
@@ -1944,16 +1807,14 @@ function AdminMenuPage() {
                 <Plus size={14} /> Category
               </Btn>
             </div>
-
-            {/* Categories + items */}
-            {categories.map(cat => (
+            {categories.map((cat: Category) => (
               <div key={cat.id} className="bg-gray-800 border border-gray-700 rounded-2xl overflow-hidden">
                 <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
                   <span className="font-semibold text-white">{cat.name}</span>
                   <span className="text-xs text-gray-500">{cat.items.length} items</span>
                 </div>
                 <div className="divide-y divide-gray-700">
-                  {cat.items.map(item => (
+                  {cat.items.map((item: MenuItem) => (
                     <div key={item.id} className="flex items-center gap-3 px-4 py-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
@@ -1963,7 +1824,7 @@ function AdminMenuPage() {
                           {!item.is_available && <Badge color="red">86'd</Badge>}
                         </div>
                         <div className="text-xs text-gray-500 mt-0.5">
-                          {item.sizes.map(s => `${s.name}: ${fmt(s.price)}`).join(' · ')}
+                          {item.sizes.map((s: ItemSize) => `${s.name}: ${fmt(s.price)}`).join(' · ')}
                         </div>
                       </div>
                       <div className="flex gap-1 shrink-0">
@@ -1992,19 +1853,11 @@ function AdminMenuPage() {
                 </div>
               </div>
             ))}
-
-            {/* Uncategorized */}
-            {(() => {
-              const uncategorized = categories.flatMap(c => c.items).length === 0
-                ? [] : menuData?.categories.flatMap(c => c.items) ?? []
-              return null // Already shown above
-            })()}
           </div>
         ) : (
-          /* Add-ons tab */
           <div className="max-w-2xl mx-auto">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {allAddons.map(addon => (
+              {allAddons.map((addon: Addon) => (
                 <div key={addon.id} className="flex items-center justify-between bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
                   <div>
                     <div className="text-white text-sm font-medium">{addon.name}</div>
@@ -2025,22 +1878,20 @@ function AdminMenuPage() {
         )}
       </div>
 
-      {/* Add Item Modal */}
       <Modal open={showAddItem} onClose={() => setShowAddItem(false)} title="Add Menu Item" maxWidth="max-w-md">
         <div className="flex flex-col gap-3">
           <Input label="Item Name" value={newItem.name} onChange={v => setNewItem(p => ({ ...p, name: v }))} />
           <Select label="Category" value={newItem.category_id}
             onChange={v => setNewItem(p => ({ ...p, category_id: v }))}
-            options={[{ value: '', label: '— No category —' }, ...categories.map(c => ({ value: c.id, label: c.name }))]} />
-
+            options={[{ value: '', label: '— No category —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
           <div>
             <div className="text-xs text-gray-400 font-medium mb-2">Sizes & Prices</div>
-            {newItem.sizes.map((s, i) => (
+            {newItem.sizes.map((s: { name: string; price: string }, i: number) => (
               <div key={i} className="flex gap-2 mb-2 items-start">
-                <Input value={s.name} onChange={v => setNewItem(p => ({ ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, name: v } : sz) }))} placeholder="Size" className="flex-1" />
-                <Input type="number" value={s.price} onChange={v => setNewItem(p => ({ ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, price: v } : sz) }))} placeholder="Price" className="w-24" />
+                <Input value={s.name} onChange={v => setNewItem(p => ({ ...p, sizes: p.sizes.map((sz: { name: string; price: string }, j: number) => j === i ? { ...sz, name: v } : sz) }))} placeholder="Size" className="flex-1" />
+                <Input type="number" value={s.price} onChange={v => setNewItem(p => ({ ...p, sizes: p.sizes.map((sz: { name: string; price: string }, j: number) => j === i ? { ...sz, price: v } : sz) }))} placeholder="Price" className="w-24" />
                 {newItem.sizes.length > 1 && (
-                  <button onClick={() => setNewItem(p => ({ ...p, sizes: p.sizes.filter((_, j) => j !== i) }))}
+                  <button onClick={() => setNewItem(p => ({ ...p, sizes: p.sizes.filter((_: { name: string; price: string }, j: number) => j !== i) }))}
                     className="text-gray-600 hover:text-red-400 mt-2"><X size={14} /></button>
                 )}
               </div>
@@ -2049,40 +1900,37 @@ function AdminMenuPage() {
               <Plus size={12} /> Add Size
             </Btn>
           </div>
-
           {allAddons.length > 0 && (
             <div>
               <div className="text-xs text-gray-400 font-medium mb-2">Available Add-ons</div>
               <div className="flex flex-wrap gap-1.5">
-                {allAddons.map(a => {
-                  const sel = newItem.addon_ids.includes(a.id)
+                {allAddons.map((a: Addon) => {
+                  const sel = newItem.addon_ids.includes(a.id);
                   return (
                     <button key={a.id}
                       onClick={() => setNewItem(p => ({
                         ...p,
-                        addon_ids: sel ? p.addon_ids.filter(id => id !== a.id) : [...p.addon_ids, a.id],
+                        addon_ids: sel ? p.addon_ids.filter((id: string) => id !== a.id) : [...p.addon_ids, a.id],
                       }))}
                       className={clsx('px-2.5 py-1 rounded-full text-xs font-medium transition-all',
                         sel ? 'text-gray-900 bg-yellow-400' : 'bg-gray-700 text-gray-400')}>
                       {a.name}
                     </button>
-                  )
+                  );
                 })}
               </div>
             </div>
           )}
-
           <div className="flex gap-2">
             <Btn variant="secondary" onClick={() => setShowAddItem(false)} className="flex-1">Cancel</Btn>
             <Btn variant="mango" onClick={handleAddItem} loading={createItem.isPending}
-              disabled={!newItem.name || newItem.sizes.every(s => !s.price)} className="flex-1">
+              disabled={!newItem.name || newItem.sizes.every((s: { price: string }) => !s.price)} className="flex-1">
               Add Item
             </Btn>
           </div>
         </div>
       </Modal>
 
-      {/* Add Addon Modal */}
       <Modal open={showAddAddon} onClose={() => setShowAddAddon(false)} title="Add Add-on">
         <div className="flex flex-col gap-3">
           <Input label="Add-on Name" value={newAddon.name} onChange={v => setNewAddon(p => ({ ...p, name: v }))} />
@@ -2095,65 +1943,63 @@ function AdminMenuPage() {
         </div>
       </Modal>
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 16: ADMIN EMPLOYEES PAGE
-// ============================================================
+// ─── Admin Employees Page ───────────────────────────────
 
 function AdminEmployeesPage() {
-  const { data: users, isLoading } = useUsers()
-  const { data: timeLogs } = useTimeLogs()
-  const { data: hoursReport } = useWorkHoursReport()
-  const createUser = useCreateUser()
-  const updateUser = useUpdateUser()
-  const deleteUser = useDeleteUser()
-  const resetPin = useResetPin()
-  const editTimeLog = useEditTimeLog()
-  const openPinModal = useUIStore(s => s.openPinModal)
-  const { user: me } = useAuthStore()
+  const { data: users, isLoading } = useUsers();
+  const { data: timeLogs } = useTimeLogs();
+  const { data: hoursReport } = useWorkHoursReport();
+  const createUser = useCreateUser();
+  const updateUser = useUpdateUser();
+  const deleteUser = useDeleteUser();
+  const resetPin = useResetPin();
+  const editTimeLog = useEditTimeLog();
+  const openPinModal = useUIStore(s => s.openPinModal);
+  const { user: me } = useAuthStore();
 
-  const [showAddUser, setShowAddUser] = useState(false)
-  const [newUser, setNewUser] = useState({ name: '', role: 'crew' as 'crew' | 'admin', pin: '' })
-  const [pinReset, setPinReset] = useState<{ userId: string; newPin: string } | null>(null)
-  const [editLog, setEditLog] = useState<{ id: string; clock_in: string; clock_out: string; reason: string } | null>(null)
-  const [tab, setTab] = useState<'users' | 'timelogs'>('users')
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [newUser, setNewUser] = useState({ name: '', role: 'crew' as 'crew' | 'admin', pin: '' });
+  const [pinReset, setPinReset] = useState<{ userId: string; newPin: string } | null>(null);
+  const [editLog, setEditLog] = useState<{ id: string; clock_in: string; clock_out: string; reason: string } | null>(null);
+  const [tab, setTab] = useState<'users' | 'timelogs'>('users');
 
   const handleAddUser = async () => {
-    const ok = await openPinModal({ required_role: 'admin' })
-    if (!ok) return
+    const ok = await openPinModal({ required_role: 'admin' });
+    if (!ok) return;
     try {
-      await createUser.mutateAsync(newUser)
-      setNewUser({ name: '', role: 'crew', pin: '' })
-      setShowAddUser(false)
-      toast('User created')
+      await createUser.mutateAsync(newUser);
+      setNewUser({ name: '', role: 'crew', pin: '' });
+      setShowAddUser(false);
+      toast('User created');
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : 'Error', 'error')
+      toast(e instanceof Error ? e.message : 'Error', 'error');
     }
-  }
+  };
 
   const handleResetPin = async () => {
-    if (!pinReset || pinReset.newPin.length !== 6) return
-    const ok = await openPinModal({ required_role: 'admin' })
-    if (!ok) return
-    await resetPin.mutateAsync({ id: pinReset.userId, new_pin: pinReset.newPin })
-    setPinReset(null)
-    toast('PIN reset')
-  }
+    if (!pinReset || pinReset.newPin.length !== 6) return;
+    const ok = await openPinModal({ required_role: 'admin' });
+    if (!ok) return;
+    await resetPin.mutateAsync({ id: pinReset.userId, new_pin: pinReset.newPin });
+    setPinReset(null);
+    toast('PIN reset');
+  };
 
   const handleEditLog = async () => {
-    if (!editLog || !editLog.reason) return
-    await editTimeLog.mutateAsync(editLog)
-    setEditLog(null)
-    toast('Time log updated')
-  }
+    if (!editLog || !editLog.reason) return;
+    await editTimeLog.mutateAsync(editLog);
+    setEditLog(null);
+    toast('Time log updated');
+  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="px-4 py-3 bg-gray-900 border-b border-gray-800 shrink-0 flex items-center gap-2">
         <div className="flex bg-gray-800 p-1 rounded-xl gap-1">
-          {(['users', 'timelogs'] as const).map(t => (
+          {(['users', 'timelogs'] as const).map((t: 'users' | 'timelogs') => (
             <button key={t} onClick={() => setTab(t)}
               className={clsx('px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
                 tab === t ? 'text-gray-900 bg-yellow-400' : 'text-gray-400')}>
@@ -2175,8 +2021,8 @@ function AdminEmployeesPage() {
               <div className="flex justify-center py-12"><RefreshCw className="animate-spin text-gray-600" /></div>
             ) : (
               <div className="flex flex-col gap-2">
-                {users?.map(u => {
-                  const summary = hoursReport?.summary.find(s => s.user_id === u.id)
+                {users?.map((u: User) => {
+                  const summary = hoursReport?.summary.find((s: { user_id: string }) => s.user_id === u.id);
                   return (
                     <div key={u.id} className={clsx(
                       'bg-gray-800 border rounded-xl px-4 py-3 flex items-center gap-3',
@@ -2211,22 +2057,21 @@ function AdminEmployeesPage() {
                         </Btn>
                       </div>
                     </div>
-                  )
+                  );
                 })}
               </div>
             )}
           </div>
         ) : (
-          /* Time logs tab */
           <div className="max-w-3xl mx-auto">
             {!timeLogs?.length ? (
               <div className="text-center text-gray-600 py-12">No time logs</div>
             ) : (
               <div className="flex flex-col gap-2">
-                {timeLogs.map(log => {
+                {timeLogs.map((log: TimeLog) => {
                   const mins = log.clock_out
                     ? differenceInMinutes(parseISO(log.clock_out), parseISO(log.clock_in))
-                    : null
+                    : null;
                   return (
                     <div key={log.id} className="flex items-center gap-3 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
                       <div className="flex-1 min-w-0">
@@ -2258,7 +2103,7 @@ function AdminEmployeesPage() {
                         <Edit2 size={13} />
                       </Btn>
                     </div>
-                  )
+                  );
                 })}
               </div>
             )}
@@ -2266,7 +2111,6 @@ function AdminEmployeesPage() {
         )}
       </div>
 
-      {/* Add User Modal */}
       <Modal open={showAddUser} onClose={() => setShowAddUser(false)} title="Add User">
         <div className="flex flex-col gap-3">
           <Input label="Full Name" value={newUser.name} onChange={v => setNewUser(p => ({ ...p, name: v }))} />
@@ -2284,7 +2128,6 @@ function AdminEmployeesPage() {
         </div>
       </Modal>
 
-      {/* Reset PIN Modal */}
       <Modal open={!!pinReset} onClose={() => setPinReset(null)} title="Reset PIN">
         <div className="flex flex-col gap-3">
           <p className="text-sm text-gray-400">Enter a new 6-digit PIN. Admin PIN required to confirm.</p>
@@ -2300,7 +2143,6 @@ function AdminEmployeesPage() {
         </div>
       </Modal>
 
-      {/* Edit Time Log Modal */}
       <Modal open={!!editLog} onClose={() => setEditLog(null)} title="Edit Time Log">
         <div className="flex flex-col gap-3">
           <p className="text-sm text-gray-400">Correct clock-in or clock-out time. A reason is required.</p>
@@ -2318,47 +2160,45 @@ function AdminEmployeesPage() {
         </div>
       </Modal>
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 17: ADMIN INVENTORY PAGE
-// ============================================================
+// ─── Admin Inventory Page ───────────────────────────────
 
 function AdminInventoryPage() {
-  const { data, isLoading } = useInventory()
-  const createItem = useCreateInventoryItem()
-  const createTx = useCreateInventoryTransaction()
+  const { data, isLoading } = useInventory();
+  const createItem = useCreateInventoryItem();
+  const createTx = useCreateInventoryTransaction();
 
-  const [showAddItem, setShowAddItem] = useState(false)
-  const [newItem, setNewItem] = useState({ name: '', unit: '' })
-  const [txModal, setTxModal] = useState<{ item_id: string; name: string } | null>(null)
-  const [tx, setTx] = useState({ type: 'stock_in' as 'stock_in' | 'stock_out' | 'wastage', qty: '', cost: '', reason: '' })
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [newItem, setNewItem] = useState({ name: '', unit: '' });
+  const [txModal, setTxModal] = useState<{ item_id: string; name: string } | null>(null);
+  const [tx, setTx] = useState({ type: 'stock_in' as 'stock_in' | 'stock_out' | 'wastage', qty: '', cost: '', reason: '' });
 
   const handleAddItem = async () => {
-    if (!newItem.name || !newItem.unit) return
-    await createItem.mutateAsync(newItem)
-    setNewItem({ name: '', unit: '' })
-    setShowAddItem(false)
-    toast('Item added')
-  }
+    if (!newItem.name || !newItem.unit) return;
+    await createItem.mutateAsync(newItem);
+    setNewItem({ name: '', unit: '' });
+    setShowAddItem(false);
+    toast('Item added');
+  };
 
   const handleTransaction = async () => {
-    if (!txModal || !tx.qty) return
+    if (!txModal || !tx.qty) return;
     await createTx.mutateAsync({
       item_id: txModal.item_id,
       type: tx.type,
       qty: parseFloat(tx.qty),
       cost: tx.cost ? parseFloat(tx.cost) : undefined,
       reason: tx.reason || undefined,
-    })
-    setTxModal(null)
-    setTx({ type: 'stock_in', qty: '', cost: '', reason: '' })
-    toast('Transaction recorded')
-  }
+    });
+    setTxModal(null);
+    setTx({ type: 'stock_in', qty: '', cost: '', reason: '' });
+    toast('Transaction recorded');
+  };
 
   const txColor = (type: string) =>
-    type === 'stock_in' ? 'green' : type === 'wastage' ? 'yellow' : 'red'
+    type === 'stock_in' ? 'green' : type === 'wastage' ? 'yellow' : 'red';
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -2374,9 +2214,8 @@ function AdminInventoryPage() {
           <div className="flex justify-center py-12"><RefreshCw className="animate-spin text-gray-600" /></div>
         ) : (
           <div className="max-w-3xl mx-auto space-y-4">
-            {/* Items */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {data?.items.map(item => (
+              {data?.items.map((item: InventoryItem) => (
                 <div key={item.id} className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 flex items-center justify-between">
                   <div>
                     <div className="text-white font-medium text-sm">{item.name}</div>
@@ -2389,7 +2228,7 @@ function AdminInventoryPage() {
                     </div>
                   </div>
                   <Btn size="sm" variant="secondary"
-                    onClick={() => { setTxModal({ item_id: item.id, name: item.name }); setTx({ type: 'stock_in', qty: '', cost: '', reason: '' }) }}>
+                    onClick={() => { setTxModal({ item_id: item.id, name: item.name }); setTx({ type: 'stock_in', qty: '', cost: '', reason: '' }); }}>
                     Log
                   </Btn>
                 </div>
@@ -2398,17 +2237,15 @@ function AdminInventoryPage() {
                 <div className="col-span-2 text-center text-gray-600 py-8 text-sm">No inventory items</div>
               )}
             </div>
-
-            {/* Recent transactions */}
             {data?.transactions.length ? (
               <div>
                 <h3 className="text-xs text-gray-500 font-medium mb-2">Recent Transactions</h3>
                 <div className="flex flex-col gap-1">
-                  {data.transactions.slice(0, 20).map(tx => (
+                  {data.transactions.slice(0, 20).map((tx: InventoryTransaction) => (
                     <div key={tx.id} className="flex items-center gap-3 bg-gray-800 border border-gray-700 rounded-xl px-3 py-2.5">
                       <Badge color={txColor(tx.type)}>{tx.type.replace('_', ' ')}</Badge>
                       <div className="flex-1 min-w-0">
-                        <span className="text-white text-sm">{data.items.find(i => i.id === tx.item_id)?.name ?? tx.item_id}</span>
+                        <span className="text-white text-sm">{data.items.find((i: InventoryItem) => i.id === tx.item_id)?.name ?? tx.item_id}</span>
                         {tx.reason && <span className="text-gray-600 text-xs ml-2">{tx.reason}</span>}
                       </div>
                       <div className="text-right shrink-0">
@@ -2425,7 +2262,6 @@ function AdminInventoryPage() {
         )}
       </div>
 
-      {/* Add Item Modal */}
       <Modal open={showAddItem} onClose={() => setShowAddItem(false)} title="Add Inventory Item">
         <div className="flex flex-col gap-3">
           <Input label="Item Name" value={newItem.name} onChange={v => setNewItem(p => ({ ...p, name: v }))} />
@@ -2438,7 +2274,6 @@ function AdminInventoryPage() {
         </div>
       </Modal>
 
-      {/* Transaction Modal */}
       <Modal open={!!txModal} onClose={() => setTxModal(null)} title={`Log: ${txModal?.name}`}>
         <div className="flex flex-col gap-3">
           <Select label="Type" value={tx.type} onChange={v => setTx(p => ({ ...p, type: v as typeof tx.type }))}
@@ -2460,33 +2295,31 @@ function AdminInventoryPage() {
         </div>
       </Modal>
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 18: ADMIN SETTINGS PAGE
-// ============================================================
+// ─── Admin Settings Page ────────────────────────────────
 
 function AdminSettingsPage() {
-  const { data: settings, isLoading } = useSettings()
-  const updateSettings = useUpdateSettings()
-  const [form, setForm] = useState<Record<string, string>>({})
-  const [dirty, setDirty] = useState(false)
+  const { data: settings, isLoading } = useSettings();
+  const updateSettings = useUpdateSettings();
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
-    if (settings) { setForm(settings); setDirty(false) }
-  }, [settings])
+    if (settings) { setForm(settings); setDirty(false); }
+  }, [settings]);
 
   const set = (key: string, val: string) => {
-    setForm(p => ({ ...p, [key]: val }))
-    setDirty(true)
-  }
+    setForm(p => ({ ...p, [key]: val }));
+    setDirty(true);
+  };
 
   const handleSave = async () => {
-    await updateSettings.mutateAsync(form)
-    setDirty(false)
-    toast('Settings saved')
-  }
+    await updateSettings.mutateAsync(form);
+    setDirty(false);
+    toast('Settings saved');
+  };
 
   const fields: { key: string; label: string; type?: string }[] = [
     { key: 'store_name', label: 'Store Name' },
@@ -2496,7 +2329,7 @@ function AdminSettingsPage() {
     { key: 'sc_discount_pct', label: 'Senior Citizen Discount %', type: 'number' },
     { key: 'pwd_discount_pct', label: 'PWD Discount %', type: 'number' },
     { key: 'hourly_rate', label: 'Hourly Rate (₱)', type: 'number' },
-  ]
+  ];
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -2513,7 +2346,7 @@ function AdminSettingsPage() {
           <div className="flex justify-center py-12"><RefreshCw className="animate-spin text-gray-600" /></div>
         ) : (
           <div className="max-w-md mx-auto flex flex-col gap-4">
-            {fields.map(f => (
+            {fields.map((f: { key: string; label: string; type?: string }) => (
               <Input
                 key={f.key}
                 label={f.label}
@@ -2531,29 +2364,27 @@ function AdminSettingsPage() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 19: ADMIN AUDIT LOG PAGE
-// ============================================================
+// ─── Admin Audit Log Page ───────────────────────────────
 
 function AdminAuditPage() {
-  const [entityType, setEntityType] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [entityType, setEntityType] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const { data: logs, isLoading } = useAuditLogs({
     entity_type: entityType || undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
-  })
+  });
 
   const actionColor = (action: string) => {
-    if (action.includes('delete') || action.includes('void') || action.includes('remove')) return 'red'
-    if (action.includes('create') || action.includes('open') || action.includes('clock_in')) return 'green'
-    if (action.includes('update') || action.includes('edit') || action.includes('reset')) return 'yellow'
-    return 'gray'
-  }
+    if (action.includes('delete') || action.includes('void') || action.includes('remove')) return 'red';
+    if (action.includes('create') || action.includes('open') || action.includes('clock_in')) return 'green';
+    if (action.includes('update') || action.includes('edit') || action.includes('reset')) return 'yellow';
+    return 'gray';
+  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -2579,7 +2410,7 @@ function AdminAuditPage() {
           <div className="text-center text-gray-600 py-12">No audit logs found</div>
         ) : (
           <div className="max-w-3xl mx-auto flex flex-col gap-1.5">
-            {logs.map(log => (
+            {logs.map((log: AuditLog) => (
               <div key={log.id} className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3">
                 <div className="flex items-start gap-3">
                   <Badge color={actionColor(log.action)}>{log.action.replace(/_/g, ' ')}</Badge>
@@ -2608,18 +2439,16 @@ function AdminAuditPage() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
-// ============================================================
-// SECTION 20: MAIN APP ROUTER
-// ============================================================
+// ─── App Shell & Router ─────────────────────────────────
 
 function AppShell() {
-  const { page } = useUIStore()
-  const { user } = useAuthStore()
+  const { page } = useUIStore();
+  const { user } = useAuthStore();
 
-  const pageMap: Partial<Record<typeof page, React.ReactNode>> = {
+  const pageMap: Partial<Record<Page, React.ReactNode>> = {
     pos:               <POSPage />,
     sales:             <SalesPage />,
     employee:          <EmployeePage />,
@@ -2629,11 +2458,10 @@ function AppShell() {
     admin_inventory:   <AdminInventoryPage />,
     admin_settings:    <AdminSettingsPage />,
     admin_audit:       <AdminAuditPage />,
-  }
+  };
 
-  // Guard admin-only pages
-  const adminPages: (typeof page)[] = ['admin_dashboard', 'admin_menu', 'admin_employees', 'admin_inventory', 'admin_settings', 'admin_audit']
-  const currentPage = adminPages.includes(page) && user?.role !== 'admin' ? 'pos' : page
+  const adminPages: Page[] = ['admin_dashboard', 'admin_menu', 'admin_employees', 'admin_inventory', 'admin_settings', 'admin_audit'];
+  const currentPage: Page = adminPages.includes(page) && user?.role !== 'admin' ? 'pos' : page;
 
   return (
     <div className="flex flex-col h-full bg-gray-950 text-white overflow-hidden">
@@ -2643,12 +2471,11 @@ function AppShell() {
       </main>
       <PinModal />
     </div>
-  )
+  );
 }
 
 export default function App() {
-  const { user } = useAuthStore()
-
-  if (!user) return <LoginPage />
-  return <AppShell />
+  const { user } = useAuthStore();
+  if (!user) return <LoginPage />;
+  return <AppShell />;
 }
