@@ -1,0 +1,13 @@
+name = "pos-worker"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+TIMEZONE = "Asia/Manila"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pos-db"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+migrations_dir = "migrations"
