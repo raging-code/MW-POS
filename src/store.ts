@@ -3,8 +3,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
-  User, CartItem, CartState, OrderType, DiscountType,
-  CartAddon, Page, PaymentLine,
+  User, CartItem, CartState, DiscountType,
+  CartAddon, Page,
 } from './types';
 
 // ============================================================
@@ -92,7 +92,6 @@ interface CartStore {
   removeItem: (cart_key: string) => void;
   updateQty: (cart_key: string, delta: number) => void;
   setDiscount: (cart_key: string, discount_type: DiscountType) => void;
-  setOrderType: (t: OrderType) => void;
   setNote: (note: string) => void;
   clearCart: () => void;
   resetIdempotencyKey: () => void;
@@ -105,7 +104,6 @@ interface CartStore {
 export const useCartStore = create<CartStore>()((set, get) => ({
   cart: {
     items: [],
-    order_type: 'dine_in',
     note: '',
     idempotency_key: crypto.randomUUID(),
   },
@@ -176,12 +174,11 @@ export const useCartStore = create<CartStore>()((set, get) => ({
     }));
   },
 
-  setOrderType: (order_type) => set((s) => ({ cart: { ...s.cart, order_type } })),
   setNote: (note) => set((s) => ({ cart: { ...s.cart, note } })),
 
   clearCart: () =>
-    set((s) => ({
-      cart: { items: [], order_type: 'dine_in', note: '', idempotency_key: crypto.randomUUID() },
+    set(() => ({
+      cart: { items: [], note: '', idempotency_key: crypto.randomUUID() },
     })),
 
   resetIdempotencyKey: () =>

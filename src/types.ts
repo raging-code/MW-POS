@@ -3,7 +3,6 @@
 export type Page =
   | 'pos'
   | 'sales'
-  | 'employee'
   | 'admin_dashboard'
   | 'admin_menu'
   | 'admin_employees'
@@ -83,7 +82,6 @@ export interface CartItem {
 
 export interface CartState {
   items: CartItem[];
-  order_type: OrderType;
   note: string;
   idempotency_key: string;
 }
@@ -180,17 +178,6 @@ export interface HeldOrder {
   created_at: string;
 }
 
-// ─── Time Logs ───────────────────────────────────────────────
-
-export interface TimeLog {
-  id: string;
-  user_id: string;
-  user_name: string;
-  clock_in: string;
-  clock_out: string | null;
-  edit_reason: string | null;
-}
-
 // ─── Reports ─────────────────────────────────────────────────
 
 export interface SalesReport {
@@ -198,17 +185,6 @@ export interface SalesReport {
   transaction_count: number;
   total_discount: number;
   payment_breakdown: Record<string, number>;
-}
-
-export interface WorkHoursSummary {
-  user_id: string;
-  user_name: string;
-  total_hours: number;
-  estimated_salary: number;
-}
-
-export interface WorkHoursReport {
-  summary: WorkHoursSummary[];
 }
 
 // ─── Settings ─────────────────────────────────────────────────

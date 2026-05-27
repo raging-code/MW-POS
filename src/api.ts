@@ -4,11 +4,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from './store'
 import type {
   User, Category, SaleListItem, SaleDetail, Shift, HeldOrder,
-  TimeLog, SalesReport, WorkHoursReport, Settings,
+  SalesReport, Settings,
   InventoryItem, InventoryTransaction, AuditLog, Addon,
 } from './types'
 
-// ─── Core fetch wrapper ──────────────────────────────────────
+// ─── Core fetch wrapper ──────────────────────────────────────────
 async function apiFetch<T>(
   path: string,
   opts: RequestInit = {},
@@ -310,47 +310,6 @@ export function useRecordMissedSale() {
   })
 }
 
-// ─── Time Logs ───────────────────────────────────────────────
-export function useTimeLogs(params?: { user_id?: string; date_from?: string; date_to?: string }) {
-  const api = useApi()
-  const qs = new URLSearchParams()
-  if (params?.user_id) qs.set('user_id', params.user_id)
-  if (params?.date_from) qs.set('date_from', params.date_from)
-  if (params?.date_to) qs.set('date_to', params.date_to)
-  return useQuery({
-    queryKey: ['time-logs', params],
-    queryFn: () => api.get<TimeLog[]>(`/time-logs?${qs}`),
-  })
-}
-
-export function useClockIn() {
-  const api = useApi()
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => api.post('/time-logs/clock-in', {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['time-logs'] }),
-  })
-}
-
-export function useClockOut() {
-  const api = useApi()
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => api.post('/time-logs/clock-out', {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['time-logs'] }),
-  })
-}
-
-export function useEditTimeLog() {
-  const api = useApi()
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; clock_in?: string; clock_out?: string; reason: string }) =>
-      api.put(`/time-logs/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['time-logs'] }),
-  })
-}
-
 // ─── Reports ─────────────────────────────────────────────────
 export function useSalesReport(params?: { date_from?: string; date_to?: string }) {
   const api = useApi()
@@ -360,17 +319,6 @@ export function useSalesReport(params?: { date_from?: string; date_to?: string }
   return useQuery({
     queryKey: ['report-sales', params],
     queryFn: () => api.get<SalesReport>(`/reports/sales?${qs}`),
-  })
-}
-
-export function useWorkHoursReport(params?: { date_from?: string; date_to?: string }) {
-  const api = useApi()
-  const qs = new URLSearchParams()
-  if (params?.date_from) qs.set('date_from', params.date_from)
-  if (params?.date_to) qs.set('date_to', params.date_to)
-  return useQuery({
-    queryKey: ['report-hours', params],
-    queryFn: () => api.get<WorkHoursReport>(`/reports/work-hours?${qs}`),
   })
 }
 
