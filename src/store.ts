@@ -96,6 +96,8 @@ interface CartStore {
   clearCart: () => void;
   resetIdempotencyKey: () => void;
   loadFromHeld: (state: CartState) => void;
+  // NEW: update add‑ons for an existing cart item
+  setAddons: (cart_key: string, addons: CartAddon[]) => void;
   subtotal: () => number;
   discountTotal: () => number;
   total: () => number;
@@ -185,6 +187,18 @@ export const useCartStore = create<CartStore>()((set, get) => ({
     set((s) => ({ cart: { ...s.cart, idempotency_key: crypto.randomUUID() } })),
 
   loadFromHeld: (state) => set({ cart: state }),
+
+  // ─── NEW: allows changing add‑ons of an existing cart item ───
+  setAddons: (cart_key, addons) => {
+    set((state) => {
+      const items = state.cart.items.map((i) =>
+        i.cart_key === cart_key
+          ? computeItemTotals({ ...i, addons }, state.scPct, state.pwdPct)
+          : i
+      );
+      return { cart: { ...state.cart, items } };
+    });
+  },
 
   subtotal: () => get().cart.items.reduce((s, i) => s + i.line_subtotal, 0),
   discountTotal: () => get().cart.items.reduce((s, i) => s + i.discount_amount, 0),

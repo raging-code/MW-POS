@@ -5,7 +5,7 @@ import { useAuthStore } from './store'
 import type {
   User, Category, SaleListItem, SaleDetail, Shift, HeldOrder,
   SalesReport, Settings,
-  InventoryItem, InventoryTransaction, AuditLog, Addon,
+  Addon, AuditLog,
 } from './types'
 
 // ─── Core fetch wrapper ──────────────────────────────────────────
@@ -25,7 +25,6 @@ async function apiFetch<T>(
   return json.data as T
 }
 
-// Hook that auto-injects token
 function useApi() {
   const token = useAuthStore(s => s.token)
   return {
@@ -83,30 +82,11 @@ export function useCreateCategory() {
   })
 }
 
-export function useUpdateCategory() {
-  const api = useApi()
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; name?: string; sort_order?: number }) =>
-      api.put(`/menu/categories/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
-  })
-}
-
-export function useDeleteCategory() {
-  const api = useApi()
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: string) => api.del(`/menu/categories/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
-  })
-}
-
 export function useCreateMenuItem() {
   const api = useApi()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { name: string; category_id?: string; sizes: { name: string; price: number }[]; addon_ids?: string[] }) =>
+    mutationFn: (body: { name: string; category_id?: string; sizes: { name: string; price: number }[] }) =>
       api.post('/menu/items', body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })
@@ -116,7 +96,7 @@ export function useUpdateMenuItem() {
   const api = useApi()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; name?: string; category_id?: string; is_active?: boolean; sizes?: { name: string; price: number }[]; addon_ids?: string[] }) =>
+    mutationFn: ({ id, ...body }: { id: string; name?: string; category_id?: string; is_active?: boolean; sizes?: { name: string; price: number }[] }) =>
       api.put(`/menu/items/${id}`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })
@@ -301,15 +281,6 @@ export function useReprintSale() {
   })
 }
 
-export function useRecordMissedSale() {
-  const api = useApi()
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: unknown) => api.post('/sales/missed', body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
-  })
-}
-
 // ─── Reports ─────────────────────────────────────────────────
 export function useSalesReport(params?: { date_from?: string; date_to?: string }) {
   const api = useApi()
@@ -389,34 +360,6 @@ export function useResetPin() {
   return useMutation({
     mutationFn: ({ id, new_pin }: { id: string; new_pin: string }) =>
       api.post(`/users/${id}/reset-pin`, { new_pin }),
-  })
-}
-
-// ─── Inventory ───────────────────────────────────────────────
-export function useInventory() {
-  const api = useApi()
-  return useQuery({
-    queryKey: ['inventory'],
-    queryFn: () => api.get<{ items: InventoryItem[]; transactions: InventoryTransaction[] }>('/inventory'),
-  })
-}
-
-export function useCreateInventoryItem() {
-  const api = useApi()
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: { name: string; unit: string }) => api.post('/inventory/items', body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory'] }),
-  })
-}
-
-export function useCreateInventoryTransaction() {
-  const api = useApi()
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (body: { item_id: string; type: 'stock_in' | 'stock_out' | 'wastage'; qty: number; cost?: number; reason?: string }) =>
-      api.post('/inventory/transactions', body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['inventory'] }),
   })
 }
 

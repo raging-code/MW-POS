@@ -15,7 +15,6 @@ export type DiscountType = 'sc' | 'pwd' | null;
 export type PaymentMethod = 'cash' | 'gcash' | 'maya';
 
 // ─── Auth ─────────────────────────────────────────────────────
-
 export interface User {
   id: string;
   name: string;
@@ -24,7 +23,6 @@ export interface User {
 }
 
 // ─── Menu ─────────────────────────────────────────────────────
-
 export interface ItemSize {
   id: string;
   name: string;
@@ -43,7 +41,7 @@ export interface MenuItem {
   name: string;
   category_id: string;
   sizes: ItemSize[];
-  addons: Addon[];
+  addons: Addon[];          // still returned by API but not used in creation/editing
   is_active: boolean;
   is_available: boolean;
 }
@@ -56,7 +54,6 @@ export interface Category {
 }
 
 // ─── Cart ─────────────────────────────────────────────────────
-
 export interface CartAddon {
   addon_id: string;
   addon_name: string;
@@ -92,7 +89,6 @@ export interface PaymentLine {
 }
 
 // ─── Sales ────────────────────────────────────────────────────
-
 export interface SaleItemAddon {
   addon_name: string;
   addon_price: number;
@@ -150,7 +146,6 @@ export interface SaleListItem {
 }
 
 // ─── Shifts ───────────────────────────────────────────────────
-
 export interface CashDrop {
   id: string;
   amount: number;
@@ -169,7 +164,6 @@ export interface Shift {
 }
 
 // ─── Held Orders ──────────────────────────────────────────────
-
 export interface HeldOrder {
   id: string;
   label: string | null;
@@ -179,7 +173,6 @@ export interface HeldOrder {
 }
 
 // ─── Reports ─────────────────────────────────────────────────
-
 export interface SalesReport {
   total_revenue: number;
   transaction_count: number;
@@ -188,7 +181,6 @@ export interface SalesReport {
 }
 
 // ─── Settings ─────────────────────────────────────────────────
-
 export interface Settings {
   store_name: string;
   store_address: string;
@@ -200,28 +192,7 @@ export interface Settings {
   [key: string]: string;
 }
 
-// ─── Inventory ───────────────────────────────────────────────
-
-export interface InventoryItem {
-  id: string;
-  name: string;
-  unit: string;
-  current_stock: number;
-}
-
-export interface InventoryTransaction {
-  id: string;
-  item_id: string;
-  type: 'stock_in' | 'stock_out' | 'wastage';
-  qty: number;
-  cost: number | null;
-  reason: string | null;
-  user_name: string;
-  created_at: string;
-}
-
 // ─── Audit Logs ───────────────────────────────────────────────
-
 export interface AuditLog {
   id: string;
   action: string;

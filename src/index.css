@@ -2,17 +2,222 @@
 @tailwind components;
 @tailwind utilities;
 
-* { -webkit-tap-highlight-color: transparent; }
-html { height: 100%; }
-body { height: 100%; overflow: hidden; }
-#root { height: 100%; }
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
 
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+:root {
+  /* ── Brand Core ── */
+  --mango-yellow:     #F9D64C;
+  --mango-yellow-dk:  #E8C23A;
+  --mango-yellow-lt:  #FEF3C0;
+  --mango-yellow-xl:  #FFFBEB;
+  --warrior-red:      #E52636;
+  --warrior-red-dk:   #C41E2D;
+  --warrior-red-lt:   #FEE2E5;
+  --leaf-green:       #1C5E30;
+  --leaf-green-dk:    #154824;
+  --leaf-green-lt:    #D1FAE5;
+  --white:            #FFFFFF;
 
+  /* ── Neutral Scale ── */
+  --gray-50:   #FAFAFA;
+  --gray-100:  #F4F4F5;
+  --gray-150:  #EBEBED;
+  --gray-200:  #E4E4E7;
+  --gray-300:  #D1D1D6;
+  --gray-400:  #A1A1AA;
+  --gray-500:  #71717A;
+  --gray-600:  #52525B;
+  --gray-700:  #3F3F46;
+  --gray-800:  #27272A;
+  --gray-900:  #18181B;
+
+  /* ── Surfaces ── */
+  --surface-page:   #F8F7F4;
+  --surface-card:   #FFFFFF;
+  --surface-raised: #FFFFFF;
+  --surface-sunken: #F4F3F0;
+
+  /* ── Shadows ── */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.07), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.04);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.08), 0 8px 10px -6px rgb(0 0 0 / 0.04);
+  --shadow-mango: 0 4px 14px 0 rgb(249 214 76 / 0.35);
+  --shadow-red:   0 4px 14px 0 rgb(229 38 54 / 0.25);
+  --shadow-green: 0 4px 14px 0 rgb(28 94 48 / 0.20);
+
+  /* ── Border Radius ── */
+  --radius-sm:   8px;
+  --radius-md:   12px;
+  --radius-lg:   16px;
+  --radius-xl:   20px;
+  --radius-2xl:  24px;
+  --radius-full: 9999px;
+
+  /* ── Typography ── */
+  --font-display: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-body:    'DM Sans', system-ui, sans-serif;
+}
+
+/* ── Reset & Base ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  height: 100%;
+  font-family: var(--font-body);
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--surface-page);
+  color: var(--gray-900);
+  font-family: var(--font-body);
+  line-height: 1.5;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar         { width: 5px; height: 5px; }
+::-webkit-scrollbar-track   { background: transparent; }
+::-webkit-scrollbar-thumb   { background: var(--gray-200); border-radius: var(--radius-full); }
+::-webkit-scrollbar-thumb:hover { background: var(--gray-300); }
+
+/* ── No‑scrollbar utility ── */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── Focus ring ── */
+:focus-visible {
+  outline: 2px solid var(--mango-yellow);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Brand background helpers ── */
+.bg-mango      { background-color: var(--mango-yellow); }
+.bg-mango-lt   { background-color: var(--mango-yellow-lt); }
+.bg-warrior    { background-color: var(--warrior-red); }
+.bg-warrior-lt { background-color: var(--warrior-red-lt); }
+.bg-leaf       { background-color: var(--leaf-green); }
+.bg-leaf-lt    { background-color: var(--leaf-green-lt); }
+
+/* ── Premium card ── */
+.card {
+  background: var(--surface-card);
+  border: 1px solid var(--gray-150);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+}
+
+.card-raised {
+  background: var(--surface-raised);
+  border: 1px solid var(--gray-150);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
+}
+
+/* ── Mango pill / tag ── */
+.pill-mango {
+  background: var(--mango-yellow-lt);
+  color: #92400e;
+  border: 1px solid #fde68a;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* ── Gradient text ── */
+.text-gradient-mango {
+  background: linear-gradient(135deg, #E8A000 0%, #F9D64C 60%, #FBBF24 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Subtle noise texture overlay (for hero areas) ── */
+.texture-noise::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+/* ── Shimmer loading ── */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, var(--gray-100) 25%, var(--gray-150) 50%, var(--gray-100) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius-md);
+}
+
+/* ── Spin animation ── */
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.animate-spin { animation: spin 0.8s linear infinite; }
+
+/* ── Bounce in ── */
+@keyframes bounceIn {
+  0%   { transform: scale(0.92); opacity: 0; }
+  60%  { transform: scale(1.03); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.animate-bounce-in { animation: bounceIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+
+/* ── Fade up ── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up { animation: fadeUp 0.2s ease-out forwards; }
+
+/* ── Active press scale ── */
+.active\:scale-95:active { transform: scale(0.95); }
+.active\:scale-98:active { transform: scale(0.98); }
+
+/* ── Category item card hover ── */
+.item-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.item-card:hover  { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.item-card:active { transform: scale(0.97); }
+
+/* ── Toast ── */
+.toast-enter {
+  animation: fadeUp 0.2s ease-out forwards;
+}
+
+/* ── Print ── */
 @media print {
   body * { visibility: hidden; }
   #receipt-print, #receipt-print * { visibility: visible; }
-  #receipt-print { position: absolute; left: 0; top: 0; width: 100%; }
+  #receipt-print {
+    position: absolute; left: 0; top: 0; width: 100%;
+  }
+}
+
+/* ── Landscape mobile helpers ── */
+@media (max-height: 500px) and (orientation: landscape) {
+  .landscape-compact { padding-top: 4px !important; padding-bottom: 4px !important; }
 }
