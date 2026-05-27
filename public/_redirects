@@ -1,1 +1,2 @@
 /api/* https://pos-worker.mangowarrior-pos.workers.dev/api/:splat 200
+/* /index.html 200
