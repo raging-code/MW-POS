@@ -19,8 +19,8 @@ async function apiFetch<T>(
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(opts.headers as Record<string, string> ?? {}),
   }
-  const BASE = import.meta.env.VITE_API_URL ?? ''
-const res = await fetch(`${BASE}/api${path}`, { ...opts, headers })
+const BASE = import.meta.env.VITE_API_URL ?? ''
+const res = await fetch(`${BASE}${path}`, { ...opts, headers })
   const json = await res.json() as { data: T; error: string | null }
   if (json.error) throw new Error(json.error)
   return json.data as T
