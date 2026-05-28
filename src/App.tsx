@@ -2979,7 +2979,19 @@ function AppShell() {
 }
 
 export default function App() {
-  const { user } = useAuthStore();
-  if (!user) return <LoginPage />;
+  const { user, token, logout } = useAuthStore();
+
+  useEffect(() => {
+    if (user && token) {
+      // Validate token is still alive
+      fetch(`${import.meta.env.VITE_API_URL ?? ''}/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(res => { if (!res.ok) logout(); })
+        .catch(() => logout());
+    }
+  }, []);
+
+  if (!user || !token) return <LoginPage />;
   return <AppShell />;
 }
