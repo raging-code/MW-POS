@@ -1,4 +1,3 @@
-// src/App.tsx — MangoWarrior POS — Premium UI/UX Redesign
 import React, { useState, useEffect, useCallback } from 'react';
 import { format, parseISO } from 'date-fns';
 import { clsx } from 'clsx';
@@ -30,18 +29,52 @@ import {
 } from './api';
 
 // ─── Category colour palette ───────────────────────────────────
+// Each entry now carries a full-card background + border for the menu item widget
 const CATEGORY_COLORS: {
   bg: string; text: string; border: string;
   pill: string; pillText: string; lightBg: string;
+  cardBg: string; cardBorder: string; cardText: string; cardSubText: string;
 }[] = [
-  { bg: 'bg-amber-50',   text: 'text-amber-900',  border: 'border-amber-200',  pill: '#F9D64C', pillText: '#78350f', lightBg: '#FFFBEB' },
-  { bg: 'bg-emerald-50', text: 'text-emerald-900', border: 'border-emerald-200', pill: '#1C5E30', pillText: '#ffffff', lightBg: '#ECFDF5' },
-  { bg: 'bg-rose-50',    text: 'text-rose-900',   border: 'border-rose-200',   pill: '#E52636', pillText: '#ffffff', lightBg: '#FFF1F2' },
-  { bg: 'bg-violet-50',  text: 'text-violet-900', border: 'border-violet-200', pill: '#7c3aed', pillText: '#ffffff', lightBg: '#F5F3FF' },
-  { bg: 'bg-sky-50',     text: 'text-sky-900',    border: 'border-sky-200',    pill: '#0284c7', pillText: '#ffffff', lightBg: '#F0F9FF' },
-  { bg: 'bg-orange-50',  text: 'text-orange-900', border: 'border-orange-200', pill: '#ea580c', pillText: '#ffffff', lightBg: '#FFF7ED' },
-  { bg: 'bg-pink-50',    text: 'text-pink-900',   border: 'border-pink-200',   pill: '#db2777', pillText: '#ffffff', lightBg: '#FDF2F8' },
-  { bg: 'bg-teal-50',    text: 'text-teal-900',   border: 'border-teal-200',   pill: '#0f766e', pillText: '#ffffff', lightBg: '#F0FDFA' },
+  {
+    bg: 'bg-amber-50',   text: 'text-amber-900',  border: 'border-amber-200',
+    pill: '#F9D64C', pillText: '#78350f', lightBg: '#FFFBEB',
+    cardBg: '#FFFBEB', cardBorder: '#FDE68A', cardText: '#78350f', cardSubText: '#92400e',
+  },
+  {
+    bg: 'bg-emerald-50', text: 'text-emerald-900', border: 'border-emerald-200',
+    pill: '#1C5E30', pillText: '#ffffff', lightBg: '#ECFDF5',
+    cardBg: '#ECFDF5', cardBorder: '#6EE7B7', cardText: '#064e3b', cardSubText: '#065f46',
+  },
+  {
+    bg: 'bg-rose-50',    text: 'text-rose-900',   border: 'border-rose-200',
+    pill: '#E52636', pillText: '#ffffff', lightBg: '#FFF1F2',
+    cardBg: '#FFF1F2', cardBorder: '#FECDD3', cardText: '#881337', cardSubText: '#9f1239',
+  },
+  {
+    bg: 'bg-violet-50',  text: 'text-violet-900', border: 'border-violet-200',
+    pill: '#7c3aed', pillText: '#ffffff', lightBg: '#F5F3FF',
+    cardBg: '#F5F3FF', cardBorder: '#DDD6FE', cardText: '#4c1d95', cardSubText: '#5b21b6',
+  },
+  {
+    bg: 'bg-sky-50',     text: 'text-sky-900',    border: 'border-sky-200',
+    pill: '#0284c7', pillText: '#ffffff', lightBg: '#F0F9FF',
+    cardBg: '#F0F9FF', cardBorder: '#BAE6FD', cardText: '#0c4a6e', cardSubText: '#075985',
+  },
+  {
+    bg: 'bg-orange-50',  text: 'text-orange-900', border: 'border-orange-200',
+    pill: '#ea580c', pillText: '#ffffff', lightBg: '#FFF7ED',
+    cardBg: '#FFF7ED', cardBorder: '#FED7AA', cardText: '#7c2d12', cardSubText: '#9a3412',
+  },
+  {
+    bg: 'bg-pink-50',    text: 'text-pink-900',   border: 'border-pink-200',
+    pill: '#db2777', pillText: '#ffffff', lightBg: '#FDF2F8',
+    cardBg: '#FDF2F8', cardBorder: '#FBCFE8', cardText: '#831843', cardSubText: '#9d174d',
+  },
+  {
+    bg: 'bg-teal-50',    text: 'text-teal-900',   border: 'border-teal-200',
+    pill: '#0f766e', pillText: '#ffffff', lightBg: '#F0FDFA',
+    cardBg: '#F0FDFA', cardBorder: '#99F6E4', cardText: '#134e4a', cardSubText: '#115e59',
+  },
 ];
 function getCategoryColor(idx: number) {
   return CATEGORY_COLORS[idx % CATEGORY_COLORS.length];
@@ -838,41 +871,48 @@ function POSPage() {
   const total = cart.total();
   const itemCount = cart.cart.items.reduce((s, i) => s + i.qty, 0);
 
+  // ── CHANGED: full-card colored background per category ──
   const renderItemCard = (item: MenuItem, colorIdx: number) => {
     const color = getCategoryColor(colorIdx);
     const minPrice = Math.min(...item.sizes.map((s: ItemSize) => s.price));
-    const priceColor = color.pill === '#F9D64C' ? '#92400e' : color.pill;
+
     return (
       <button
         key={item.id}
         onClick={() => handleItemTap(item)}
-        className="item-card group border rounded-2xl p-3.5 text-left flex flex-col gap-1.5 bg-white relative overflow-hidden"
+        className="item-card group rounded-2xl p-3.5 text-left flex flex-col gap-1.5 relative overflow-hidden border-2"
         style={{
-          borderColor: color.pill + '40',
+          backgroundColor: color.cardBg,
+          borderColor: color.cardBorder,
           boxShadow: 'var(--shadow-sm)',
         }}
       >
-        <div className="absolute top-0 left-0 right-0 h-0.5 rounded-t-2xl opacity-60"
+        {/* subtle inner glow strip at top */}
+        <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl opacity-70"
           style={{ backgroundColor: color.pill }} />
 
-        <div className="text-sm font-700 text-gray-900 leading-snug line-clamp-2 flex-1 mt-0.5"
-          style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+        <div
+          className="text-sm font-700 leading-snug line-clamp-2 flex-1 mt-0.5"
+          style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: color.cardText }}
+        >
           {item.name}
         </div>
 
         <div className="flex items-end justify-between gap-1 mt-auto">
           <div>
-            <div className="text-sm font-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 800, color: priceColor }}>
+            <div className="text-sm font-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 800, color: color.cardSubText }}>
               {item.sizes.length > 1 ? `from ${fmt(minPrice)}` : fmt(minPrice)}
             </div>
             {item.sizes.length > 1 && (
-              <div className="text-xs mt-0.5 font-medium" style={{ color: priceColor, opacity: 0.6 }}>
+              <div className="text-xs mt-0.5 font-medium" style={{ color: color.cardSubText, opacity: 0.7 }}>
                 {item.sizes.length} sizes
               </div>
             )}
           </div>
-          <div className="w-7 h-7 rounded-xl flex items-center justify-center text-white transition-all group-hover:scale-110 shrink-0"
-            style={{ backgroundColor: color.pill }}>
+          <div
+            className="w-7 h-7 rounded-xl flex items-center justify-center transition-all group-hover:scale-110 shrink-0"
+            style={{ backgroundColor: color.pill, color: color.pillText }}
+          >
             <Plus size={13} />
           </div>
         </div>
@@ -1173,6 +1213,9 @@ function POSPage() {
 }
 
 // ─── Cart Item Row ─────────────────────────────────────────────
+// CHANGED: restructured into two clear rows:
+//   Row 1 → item name | size | price (right-aligned)
+//   Row 2 → qty stepper | Add-ons btn | SC | PWD | ✕
 function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }) {
   const cart = useCartStore();
   const [showAddonPicker, setShowAddonPicker] = useState(false);
@@ -1180,39 +1223,42 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
   return (
     <div className="rounded-2xl border overflow-hidden transition-all"
       style={{ borderColor: '#E4E4E7', backgroundColor: '#FAFAF9', boxShadow: 'var(--shadow-xs)' }}>
-      <div className="px-3.5 pt-3 pb-2">
-        <div className="flex justify-between items-start gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-700 text-gray-900 leading-snug" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-              {item.item_name}
+
+      {/* ── Row 1: name + size + price ── */}
+      <div className="flex items-start justify-between gap-2 px-3.5 pt-3 pb-1.5">
+        <div className="flex-1 min-w-0">
+          <span className="text-sm font-700 text-gray-900 leading-snug" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+            {item.item_name}
+          </span>
+          {item.size_name && (
+            <span className="ml-2 text-xs text-gray-400 font-medium">{item.size_name}</span>
+          )}
+          {/* add-on tags */}
+          {item.addons.length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {item.addons.map((a, i) => (
+                <span key={i} className="text-xs px-1.5 py-0.5 rounded-md font-medium"
+                  style={{ backgroundColor: 'var(--leaf-green-lt)', color: 'var(--leaf-green)' }}>
+                  +{a.addon_name}{a.qty > 1 ? ` ×${a.qty}` : ''}
+                </span>
+              ))}
             </div>
-            {item.size_name && (
-              <div className="text-xs text-gray-400 mt-0.5 font-medium">{item.size_name}</div>
-            )}
-            {item.addons.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {item.addons.map((a, i) => (
-                  <span key={i} className="text-xs px-1.5 py-0.5 rounded-md font-medium"
-                    style={{ backgroundColor: 'var(--leaf-green-lt)', color: 'var(--leaf-green)' }}>
-                    +{a.addon_name}{a.qty > 1 ? ` ×${a.qty}` : ''}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="text-right shrink-0">
-            <span className="text-base font-800 text-amber-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
-              {fmt(item.line_total)}
-            </span>
-            {item.discount_amount > 0 && (
-              <div className="text-xs text-emerald-600 font-semibold">−{fmt(item.discount_amount)}</div>
-            )}
-          </div>
+          )}
+        </div>
+        <div className="text-right shrink-0">
+          <span className="text-base font-800 text-amber-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+            {fmt(item.line_total)}
+          </span>
+          {item.discount_amount > 0 && (
+            <div className="text-xs text-emerald-600 font-semibold">−{fmt(item.discount_amount)}</div>
+          )}
         </div>
       </div>
 
-      <div className="flex items-center gap-2 px-3.5 pb-3">
-        <div className="flex items-center gap-1.5 bg-white rounded-xl border border-gray-200 p-1 shadow-sm">
+      {/* ── Row 2: qty | add-ons | SC | PWD | remove ── */}
+      <div className="flex items-center gap-1.5 px-3.5 pb-3 pt-1 flex-wrap">
+        {/* qty stepper */}
+        <div className="flex items-center gap-1 bg-white rounded-xl border border-gray-200 p-0.5 shadow-sm shrink-0">
           <button onClick={() => cart.updateQty(item.cart_key, -1)}
             className="w-6 h-6 rounded-lg hover:bg-red-50 hover:text-red-500 flex items-center justify-center text-gray-500 transition-colors">
             <Minus size={10} />
@@ -1226,41 +1272,45 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
           </button>
         </div>
 
+        {/* add-ons button */}
         <button onClick={() => setShowAddonPicker(true)}
-          className="flex items-center gap-1 text-xs font-600 transition-colors px-2 py-1 rounded-lg hover:bg-green-50"
+          className="flex items-center gap-1 text-xs font-600 transition-colors px-2 py-1 rounded-lg hover:bg-green-50 border border-transparent hover:border-green-200"
           style={{ color: 'var(--leaf-green)', fontWeight: 600 }}>
           <Plus size={10} />
           {item.addons.length > 0 ? `${item.addons.length} add-on${item.addons.length > 1 ? 's' : ''}` : 'Add-ons'}
         </button>
 
-        <div className="flex gap-1 ml-auto">
-          <button
-            onClick={() => cart.setDiscount(item.cart_key, item.discount_type === 'sc' ? null : 'sc')}
-            className={clsx(
-              'px-2 py-1 rounded-lg text-xs font-700 transition-all border',
-              item.discount_type === 'sc'
-                ? 'bg-sky-500 text-white border-sky-500 shadow-sm'
-                : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600 hover:border-gray-300'
-            )}
-            style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-            SC
-          </button>
-          <button
-            onClick={() => cart.setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd')}
-            className={clsx(
-              'px-2 py-1 rounded-lg text-xs font-700 transition-all border',
-              item.discount_type === 'pwd'
-                ? 'bg-violet-500 text-white border-violet-500 shadow-sm'
-                : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600 hover:border-gray-300'
-            )}
-            style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-            PWD
-          </button>
-          <button onClick={() => cart.removeItem(item.cart_key)}
-            className="w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors ml-1">
-            <X size={13} />
-          </button>
-        </div>
+        {/* SC button */}
+        <button
+          onClick={() => cart.setDiscount(item.cart_key, item.discount_type === 'sc' ? null : 'sc')}
+          className={clsx(
+            'px-2 py-1 rounded-lg text-xs font-700 transition-all border',
+            item.discount_type === 'sc'
+              ? 'bg-sky-500 text-white border-sky-500 shadow-sm'
+              : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600 hover:border-gray-300'
+          )}
+          style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+          SC
+        </button>
+
+        {/* PWD button */}
+        <button
+          onClick={() => cart.setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd')}
+          className={clsx(
+            'px-2 py-1 rounded-lg text-xs font-700 transition-all border',
+            item.discount_type === 'pwd'
+              ? 'bg-violet-500 text-white border-violet-500 shadow-sm'
+              : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600 hover:border-gray-300'
+          )}
+          style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+          PWD
+        </button>
+
+        {/* remove */}
+        <button onClick={() => cart.removeItem(item.cart_key)}
+          className="w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors ml-auto">
+          <X size={13} />
+        </button>
       </div>
 
       {showAddonPicker && (
