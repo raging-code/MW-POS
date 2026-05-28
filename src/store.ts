@@ -32,31 +32,69 @@ export const useAuthStore = create<AuthStore>()(
 // ============================================================
 // UI / NAVIGATION STORE
 // ============================================================
+interface PinModalState {
+  open: boolean;
+  required_role?: 'admin';
+  allow_any_user?: boolean; // NEW: any user can verify, returns who verified
+  resolve?: (result: PinVerifyResult) => void;
+}
+
+export interface PinVerifyResult {
+  verified: boolean;
+  user_id?: string;
+  user_name?: string;
+  role?: string;
+}
+
 interface UIStore {
   page: Page;
   navigate: (page: Page) => void;
-  pinModal: {
-    open: boolean;
-    required_role?: 'admin';
-    resolve?: (verified: boolean) => void;
-  };
-  openPinModal: (opts?: { required_role?: 'admin' }) => Promise<boolean>;
-  resolvePinModal: (verified: boolean) => void;
+  pinModal: PinModalState;
+  openPinModal: (opts?: { required_role?: 'admin'; allow_any_user?: boolean }) => Promise<PinVerifyResult>;
+  resolvePinModal: (result: PinVerifyResult) => void;
+  // PIN lockout state
+  pinAttempts: number;
+  pinLockedUntil: number | null;
+  incrementPinAttempts: () => void;
+  resetPinAttempts: () => void;
 }
 
 export const useUIStore = create<UIStore>((set, get) => ({
   page: 'pos',
   navigate: (page) => set({ page }),
   pinModal: { open: false },
+  pinAttempts: 0,
+  pinLockedUntil: null,
+
   openPinModal: (opts) =>
-    new Promise<boolean>((resolve) => {
-      set({ pinModal: { open: true, required_role: opts?.required_role, resolve } });
+    new Promise<PinVerifyResult>((resolve) => {
+      set({
+        pinModal: {
+          open: true,
+          required_role: opts?.required_role,
+          allow_any_user: opts?.allow_any_user,
+          resolve,
+        },
+      });
     }),
-  resolvePinModal: (verified) => {
+
+  resolvePinModal: (result) => {
     const { pinModal } = get();
-    pinModal.resolve?.(verified);
+    pinModal.resolve?.(result);
     set({ pinModal: { open: false } });
   },
+
+  incrementPinAttempts: () => {
+    const { pinAttempts } = get();
+    const next = pinAttempts + 1;
+    if (next >= 5) {
+      set({ pinAttempts: 0, pinLockedUntil: Date.now() + 60_000 });
+    } else {
+      set({ pinAttempts: next });
+    }
+  },
+
+  resetPinAttempts: () => set({ pinAttempts: 0, pinLockedUntil: null }),
 }));
 
 // ============================================================

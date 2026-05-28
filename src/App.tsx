@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { format, parseISO } from 'date-fns';
 import { clsx } from 'clsx';
 import {
@@ -6,7 +6,7 @@ import {
   LogOut, Users, BarChart2, Settings, Package, Receipt,
   AlertTriangle, Printer, Trash2, Edit2, RefreshCw,
   DollarSign, TrendingUp, Menu as MenuIcon, ShieldCheck,
-  ArrowLeft, Save, ChevronRight, Coffee, Tag,
+  ArrowLeft, Save, ChevronRight, Coffee, Tag, Maximize, Minimize,
 } from 'lucide-react';
 import { useAuthStore, useCartStore, useUIStore } from './store';
 import type {
@@ -25,57 +25,31 @@ import {
   useUsers, useCreateUser, useUpdateUser, useDeleteUser, useResetPin,
   useAuditLogs, useToggleAvailability, useCreateMenuItem,
   useUpdateMenuItem, useDeleteMenuItem, useCreateCategory,
-  useUpdateAddon, useCreateAddon,
+  useUpdateAddon, useCreateAddon, useEditSale,
 } from './api';
 
 // ─── Category colour palette ───────────────────────────────────
-// Each entry now carries a full-card background + border for the menu item widget
+const CARD_COLOR_CLASSES = [
+  'ic-amber', 'ic-emerald', 'ic-rose', 'ic-violet',
+  'ic-sky', 'ic-orange', 'ic-pink', 'ic-teal',
+] as const;
+type CardColorClass = typeof CARD_COLOR_CLASSES[number];
+
 const CATEGORY_COLORS: {
-  bg: string; text: string; border: string;
   pill: string; pillText: string; lightBg: string;
-  cardBg: string; cardBorder: string; cardText: string; cardSubText: string;
+  cardClass: CardColorClass;
+  accentBar: string;
 }[] = [
-  {
-    bg: 'bg-amber-50',   text: 'text-amber-900',  border: 'border-amber-200',
-    pill: '#F9D64C', pillText: '#78350f', lightBg: '#FFFBEB',
-    cardBg: '#FFFBEB', cardBorder: '#FDE68A', cardText: '#78350f', cardSubText: '#92400e',
-  },
-  {
-    bg: 'bg-emerald-50', text: 'text-emerald-900', border: 'border-emerald-200',
-    pill: '#1C5E30', pillText: '#ffffff', lightBg: '#ECFDF5',
-    cardBg: '#ECFDF5', cardBorder: '#6EE7B7', cardText: '#064e3b', cardSubText: '#065f46',
-  },
-  {
-    bg: 'bg-rose-50',    text: 'text-rose-900',   border: 'border-rose-200',
-    pill: '#E52636', pillText: '#ffffff', lightBg: '#FFF1F2',
-    cardBg: '#FFF1F2', cardBorder: '#FECDD3', cardText: '#881337', cardSubText: '#9f1239',
-  },
-  {
-    bg: 'bg-violet-50',  text: 'text-violet-900', border: 'border-violet-200',
-    pill: '#7c3aed', pillText: '#ffffff', lightBg: '#F5F3FF',
-    cardBg: '#F5F3FF', cardBorder: '#DDD6FE', cardText: '#4c1d95', cardSubText: '#5b21b6',
-  },
-  {
-    bg: 'bg-sky-50',     text: 'text-sky-900',    border: 'border-sky-200',
-    pill: '#0284c7', pillText: '#ffffff', lightBg: '#F0F9FF',
-    cardBg: '#F0F9FF', cardBorder: '#BAE6FD', cardText: '#0c4a6e', cardSubText: '#075985',
-  },
-  {
-    bg: 'bg-orange-50',  text: 'text-orange-900', border: 'border-orange-200',
-    pill: '#ea580c', pillText: '#ffffff', lightBg: '#FFF7ED',
-    cardBg: '#FFF7ED', cardBorder: '#FED7AA', cardText: '#7c2d12', cardSubText: '#9a3412',
-  },
-  {
-    bg: 'bg-pink-50',    text: 'text-pink-900',   border: 'border-pink-200',
-    pill: '#db2777', pillText: '#ffffff', lightBg: '#FDF2F8',
-    cardBg: '#FDF2F8', cardBorder: '#FBCFE8', cardText: '#831843', cardSubText: '#9d174d',
-  },
-  {
-    bg: 'bg-teal-50',    text: 'text-teal-900',   border: 'border-teal-200',
-    pill: '#0f766e', pillText: '#ffffff', lightBg: '#F0FDFA',
-    cardBg: '#F0FDFA', cardBorder: '#99F6E4', cardText: '#134e4a', cardSubText: '#115e59',
-  },
+  { pill: '#F59E0B', pillText: '#ffffff', lightBg: '#FFF8E1', cardClass: 'ic-amber',   accentBar: '#F59E0B' },
+  { pill: '#059669', pillText: '#ffffff', lightBg: '#E8F5E9', cardClass: 'ic-emerald', accentBar: '#059669' },
+  { pill: '#E11D48', pillText: '#ffffff', lightBg: '#FFF0F3', cardClass: 'ic-rose',    accentBar: '#E11D48' },
+  { pill: '#7C3AED', pillText: '#ffffff', lightBg: '#F3E5F5', cardClass: 'ic-violet',  accentBar: '#7C3AED' },
+  { pill: '#0284C7', pillText: '#ffffff', lightBg: '#E1F5FE', cardClass: 'ic-sky',     accentBar: '#0284C7' },
+  { pill: '#EA580C', pillText: '#ffffff', lightBg: '#FFF3E0', cardClass: 'ic-orange',  accentBar: '#EA580C' },
+  { pill: '#DB2777', pillText: '#ffffff', lightBg: '#FCE4EC', cardClass: 'ic-pink',    accentBar: '#DB2777' },
+  { pill: '#0F766E', pillText: '#ffffff', lightBg: '#E0F2F1', cardClass: 'ic-teal',    accentBar: '#0F766E' },
 ];
+
 function getCategoryColor(idx: number) {
   return CATEGORY_COLORS[idx % CATEGORY_COLORS.length];
 }
@@ -257,27 +231,47 @@ function Modal({
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/25 backdrop-blur-sm" onClick={onClose} />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
       <div className={clsx(
-        'relative bg-white rounded-2xl shadow-2xl w-full max-h-[90vh] overflow-y-auto animate-bounce-in',
+        'relative bg-white rounded-2xl shadow-2xl w-full overflow-y-auto animate-bounce-in scrollable pin-modal-inner',
         'border border-gray-100',
         maxWidth
-      )}>
+      )} style={{ maxHeight: '92vh' }}>
         {title && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white/95 backdrop-blur-sm z-10 rounded-t-2xl">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 sticky top-0 bg-white/95 backdrop-blur-sm z-10 rounded-t-2xl">
             <h2 className="text-base font-800 text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>{title}</h2>
             {onClose && (
-              <button onClick={onClose}
-                className="text-gray-400 hover:text-gray-700 p-1.5 rounded-xl hover:bg-gray-100 transition-colors">
+              <button onClick={onClose} aria-label="Close dialog"
+                className="text-gray-400 hover:text-gray-700 p-1.5 rounded-xl hover:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400">
                 <X size={16} />
               </button>
             )}
           </div>
         )}
-        <div className="p-6">{children}</div>
+        <div className="p-5">{children}</div>
       </div>
     </div>
+  );
+}
+
+// ─── Confirm Dialog ───────────────────────────────────────────
+function ConfirmDialog({
+  open, onClose, onConfirm, title, message, confirmLabel = 'Confirm', variant = 'danger',
+}: {
+  open: boolean; onClose: () => void; onConfirm: () => void;
+  title: string; message: string; confirmLabel?: string; variant?: 'danger' | 'mango';
+}) {
+  return (
+    <Modal open={open} onClose={onClose} title={title} maxWidth="max-w-sm">
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-gray-600">{message}</p>
+        <div className="flex gap-2">
+          <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
+          <Btn variant={variant} onClick={() => { onConfirm(); onClose(); }} className="flex-1">{confirmLabel}</Btn>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -313,6 +307,7 @@ function formatAuditEntry(log: AuditLog): { title: string; detail: string | null
       store_name: 'Store Name', store_address: 'Address', receipt_footer: 'Receipt Footer',
       sc_discount_pct: 'SC Discount %', pwd_discount_pct: 'PWD Discount %', total: 'Total',
       status: 'Status', order_type: 'Order Type', qty: 'Qty', type: 'Type',
+      actioned_by: 'Actioned By',
     };
     Object.entries(fieldMap).forEach(([key, readable]) => {
       if (parsed && key in parsed && parsed[key] !== undefined && parsed[key] !== null && parsed[key] !== '') {
@@ -330,88 +325,331 @@ function formatAuditEntry(log: AuditLog): { title: string; detail: string | null
   return { title: label, detail: details.length > 0 ? details.join(' · ') : null };
 }
 
-// ─── PIN Modal ────────────────────────────────────────────────
+// ─── PIN lockout helpers ──────────────────────────────────────
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_LOCKOUT_MS = 60_000;
+
+// Per-session lockout store (not persisted — resets on page reload, which is fine)
+const pinLockoutState = {
+  attempts: 0,
+  lockedUntil: 0,
+  increment() {
+    this.attempts += 1;
+    if (this.attempts >= PIN_MAX_ATTEMPTS) {
+      this.lockedUntil = Date.now() + PIN_LOCKOUT_MS;
+      this.attempts = 0;
+    }
+  },
+  reset() { this.attempts = 0; this.lockedUntil = 0; },
+  isLocked() { return Date.now() < this.lockedUntil; },
+  secondsLeft() { return Math.max(0, Math.ceil((this.lockedUntil - Date.now()) / 1000)); },
+};
+
+// ─── ANY-USER PIN Modal ───────────────────────────────────────
+// For sensitive actions: any user can authenticate using their own PIN
+// Returns { verified, user_id, user_name, role } so caller can log who did it
+function AnyUserPinModal({
+  open, onClose, onSuccess, title = '🔒 Verify Identity',
+  description = 'Any staff member may authorize this action using their own PIN.',
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: (result: { user_id: string; user_name: string; role: string }) => void;
+  title?: string;
+  description?: string;
+}) {
+  const { data: usersList, isLoading: usersLoading } = useUsersList();
+  console.log('AnyUserPinModal - usersList:', usersList, 'isLoading:', usersLoading);
+  const verifyPin = useVerifyPin();
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
+  const [locked, setLocked] = useState(false);
+  const [lockSecs, setLockSecs] = useState(0);
+
+  useEffect(() => {
+    if (open) { setPin(''); setError(''); setSelectedUser(null); }
+  }, [open]);
+
+  // Lockout countdown
+  useEffect(() => {
+    if (!locked) return;
+    const iv = setInterval(() => {
+      const secs = pinLockoutState.secondsLeft();
+      if (secs <= 0) { setLocked(false); setLockSecs(0); clearInterval(iv); }
+      else setLockSecs(secs);
+    }, 500);
+    return () => clearInterval(iv);
+  }, [locked]);
+
+  useEffect(() => {
+    if (!open || !selectedUser) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key >= '0' && e.key <= '9') press(e.key);
+      else if (e.key === 'Backspace') press('DEL');
+      else if (e.key === 'Escape') { setSelectedUser(null); setPin(''); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, selectedUser, pin]);
+
+  const doSubmit = useCallback(async (pinValue: string, user: User) => {
+    if (pinLockoutState.isLocked()) {
+      setLocked(true); setLockSecs(pinLockoutState.secondsLeft()); setPin(''); return;
+    }
+    try {
+      const res = await verifyPin.mutateAsync({ user_id: user.id, pin: pinValue });
+      pinLockoutState.reset();
+      onSuccess({ user_id: user.id, user_name: user.name, role: user.role });
+    } catch {
+      pinLockoutState.increment();
+      if (pinLockoutState.isLocked()) {
+        setLocked(true); setLockSecs(pinLockoutState.secondsLeft());
+        setError(`Too many attempts. Locked for ${pinLockoutState.secondsLeft()}s.`);
+      } else {
+        setError(`Invalid PIN. ${PIN_MAX_ATTEMPTS - pinLockoutState.attempts} attempt(s) left.`);
+      }
+      setPin('');
+    }
+  }, [verifyPin, onSuccess]);
+
+  const press = (val: string) => {
+    if (locked) return;
+    if (val === 'DEL') { setPin(p => p.slice(0, -1)); setError(''); return; }
+    if (pin.length >= 6) return;
+    const next = pin + val;
+    setPin(next); setError('');
+    if (next.length === 6 && selectedUser) setTimeout(() => doSubmit(next, selectedUser), 50);
+  };
+
+  if (!open) return null;
+
+  return (
+    <Modal open={open} onClose={onClose} title={title} maxWidth="max-w-xs">
+      <div className="flex flex-col items-center gap-4">
+        <p className="text-sm text-gray-500 text-center leading-relaxed">{description}</p>
+
+        {!selectedUser ? (
+          <div className="flex flex-col gap-2 w-full">
+            <p className="text-xs text-gray-400 text-center font-medium">Select your account</p>
+            {(usersList ?? []).map((u: User) => (
+              <button key={u.id}
+                onClick={() => { setSelectedUser(u); setPin(''); setError(''); }}
+                className="flex items-center gap-3 p-3 bg-gray-50 hover:bg-yellow-50 border border-gray-200
+                  hover:border-yellow-300 rounded-2xl transition-all text-left group active:scale-98
+                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-amber-900 text-sm shrink-0"
+                  style={{ backgroundColor: 'var(--mango-yellow)', fontFamily: 'var(--font-display)' }}>
+                  {u.name[0].toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-gray-900 font-700 text-sm" style={{ fontWeight: 700 }}>{u.name}</div>
+                  <div className="text-gray-400 text-xs capitalize">{u.role}</div>
+                </div>
+                <ChevronRight size={14} className="text-gray-300 group-hover:text-yellow-500 shrink-0" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <>
+            <button onClick={() => { setSelectedUser(null); setPin(''); setError(''); }}
+              className="flex items-center gap-1.5 text-gray-400 hover:text-gray-700 text-sm transition-colors self-start font-medium
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 rounded-lg px-1">
+              <ArrowLeft size={14} /> {selectedUser.name}
+            </button>
+
+            {locked ? (
+              <div className="flex flex-col items-center gap-2 py-4">
+                <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center">
+                  <AlertTriangle size={24} className="text-red-500" />
+                </div>
+                <p className="text-red-600 font-700 text-sm text-center" style={{ fontWeight: 700 }}>PIN entry locked</p>
+                <p className="text-gray-500 text-xs text-center">Try again in <span className="font-bold text-red-600">{lockSecs}s</span></p>
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-2" role="status" aria-live="polite">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="rounded-full border-2 flex items-center justify-center transition-all duration-150"
+                      style={{
+                        width: '36px', height: '36px',
+                        borderColor: i < pin.length ? 'var(--mango-yellow)' : '#E4E4E7',
+                        backgroundColor: i < pin.length ? 'var(--mango-yellow)' : '#F4F4F5',
+                      }}>
+                      {i < pin.length && <span className="text-amber-900 font-black" style={{ fontSize: '9px' }}>●</span>}
+                    </div>
+                  ))}
+                </div>
+
+                {error && (
+                  <div className="flex items-center gap-2 text-red-600 text-xs bg-red-50 px-3 py-2 rounded-xl border border-red-100 w-full justify-center font-medium" role="alert">
+                    <AlertTriangle size={12} /> {error}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 w-full gap-2" style={{ maxWidth: '210px' }} role="group" aria-label="PIN keypad">
+                  {['1','2','3','4','5','6','7','8','9','','0','DEL'].map((k, i) =>
+                    k === '' ? <div key={i} /> : (
+                      <button key={i} onClick={() => press(k)}
+                        aria-label={k === 'DEL' ? 'Delete last digit' : `Digit ${k}`}
+                        className={clsx(
+                          'rounded-xl font-bold transition-all duration-100 active:scale-95 border select-none',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                          k === 'DEL'
+                            ? 'bg-gray-100 text-gray-500 text-xs border-gray-200 hover:bg-gray-200'
+                            : 'bg-white text-gray-900 border-gray-200 hover:bg-yellow-50 hover:border-yellow-300 shadow-sm'
+                        )}
+                        style={{ height: '50px', fontSize: '18px', fontFamily: 'var(--font-display)' }}>
+                        {k}
+                      </button>
+                    )
+                  )}
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        <Btn onClick={onClose} variant="ghost" size="sm">Cancel</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── PIN Modal (self-verify, with lockout) ─────────────────────
 function PinModal() {
   const { pinModal, resolvePinModal } = useUIStore();
   const { user } = useAuthStore();
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [locked, setLocked] = useState(false);
+  const [lockSecs, setLockSecs] = useState(0);
   const verifyPin = useVerifyPin();
 
   useEffect(() => {
     if (pinModal.open) { setPin(''); setError(''); }
   }, [pinModal.open]);
 
+  // Lockout countdown
+  useEffect(() => {
+    if (!locked) return;
+    const iv = setInterval(() => {
+      const secs = pinLockoutState.secondsLeft();
+      if (secs <= 0) { setLocked(false); setLockSecs(0); clearInterval(iv); }
+      else setLockSecs(secs);
+    }, 500);
+    return () => clearInterval(iv);
+  }, [locked]);
+
+  useEffect(() => {
+    if (!pinModal.open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key >= '0' && e.key <= '9') press(e.key);
+      else if (e.key === 'Backspace') press('DEL');
+      else if (e.key === 'Escape') resolvePinModal({ verified: false });
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [pinModal.open, pin]);
+
   const doSubmit = useCallback(async (pinValue: string) => {
     if (!user) return;
+    if (pinLockoutState.isLocked()) {
+      setLocked(true); setLockSecs(pinLockoutState.secondsLeft()); setPin(''); return;
+    }
     try {
-      await verifyPin.mutateAsync({ user_id: user.id, pin: pinValue, required_role: pinModal.required_role });
-      resolvePinModal(true);
+      const res = await verifyPin.mutateAsync({ user_id: user.id, pin: pinValue, required_role: pinModal.required_role });
+      pinLockoutState.reset();
+      resolvePinModal({ verified: true, user_id: user.id, user_name: user.name, role: user.role });
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Invalid PIN');
+      pinLockoutState.increment();
+      if (pinLockoutState.isLocked()) {
+        setLocked(true); setLockSecs(pinLockoutState.secondsLeft());
+        setError(`Too many attempts. Locked for ${pinLockoutState.secondsLeft()}s.`);
+      } else {
+        setError(`Invalid PIN. ${PIN_MAX_ATTEMPTS - pinLockoutState.attempts} attempt(s) left.`);
+      }
       setPin('');
     }
   }, [user, verifyPin, pinModal.required_role, resolvePinModal]);
 
   const press = (val: string) => {
+    if (locked) return;
     if (val === 'DEL') { setPin(p => p.slice(0, -1)); setError(''); return; }
     if (pin.length >= 6) return;
     const next = pin + val;
-    setPin(next);
-    setError('');
+    setPin(next); setError('');
     if (next.length === 6) setTimeout(() => doSubmit(next), 50);
   };
 
   return (
     <Modal
       open={pinModal.open}
-      onClose={() => resolvePinModal(false)}
+      onClose={() => resolvePinModal({ verified: false })}
       title={pinModal.required_role === 'admin' ? '🔒 Admin Verification' : '🔒 Enter PIN'}
+      maxWidth="max-w-xs"
     >
-      <div className="flex flex-col items-center gap-6">
+      <div className="flex flex-col items-center pin-gap" style={{ gap: '16px' }}>
         <p className="text-sm text-gray-500 text-center leading-relaxed">
           {pinModal.required_role === 'admin'
             ? 'Admin PIN required to continue'
-            : 'Enter your 6-digit PIN to continue'}
+            : 'Enter your 6-digit PIN'}
         </p>
+        <p className="text-xs text-gray-400 pin-hide-hint" style={{ marginTop: '-8px' }}>You can also type on your keyboard</p>
 
-        <div className="flex gap-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className={clsx(
-              'w-12 h-12 rounded-full border-2 flex items-center justify-center text-xl transition-all duration-150',
-              i < pin.length
-                ? 'border-yellow-400 shadow-[0_0_0_4px_rgba(249,214,76,0.15)]'
-                : 'border-gray-200 bg-gray-50'
-            )} style={i < pin.length ? { backgroundColor: 'var(--mango-yellow)' } : {}}>
-              {i < pin.length && <span className="text-amber-900 font-black text-sm">●</span>}
+        {locked ? (
+          <div className="flex flex-col items-center gap-2 py-4">
+            <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center">
+              <AlertTriangle size={24} className="text-red-500" />
             </div>
-          ))}
-        </div>
-
-        {error && (
-          <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 px-4 py-2.5 rounded-xl border border-red-100 w-full justify-center font-medium">
-            <AlertTriangle size={14} /> {error}
+            <p className="text-red-600 font-700 text-sm text-center" style={{ fontWeight: 700 }}>PIN entry locked</p>
+            <p className="text-gray-500 text-xs text-center">Too many failed attempts. Try again in <span className="font-bold text-red-600">{lockSecs}s</span></p>
           </div>
+        ) : (
+          <>
+            <div className="flex pin-gap" style={{ gap: '8px' }} role="status" aria-live="polite" aria-label={`${pin.length} of 6 digits entered`}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i}
+                  className="pin-dot rounded-full border-2 flex items-center justify-center transition-all duration-150"
+                  style={{
+                    width: '38px', height: '38px',
+                    borderColor: i < pin.length ? 'var(--mango-yellow)' : '#E4E4E7',
+                    backgroundColor: i < pin.length ? 'var(--mango-yellow)' : '#F4F4F5',
+                    boxShadow: i < pin.length ? '0 0 0 3px rgba(249,214,76,0.2)' : 'none',
+                  }}>
+                  {i < pin.length && <span className="text-amber-900 font-black" style={{ fontSize: '10px', lineHeight: 1 }}>●</span>}
+                </div>
+              ))}
+            </div>
+
+            {error && (
+              <div className="flex items-center gap-2 text-red-600 text-xs bg-red-50 px-3 py-2 rounded-xl border border-red-100 w-full justify-center font-medium" role="alert">
+                <AlertTriangle size={12} /> {error}
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 w-full pin-gap" style={{ gap: '8px', maxWidth: '220px' }} role="group" aria-label="PIN keypad">
+              {['1','2','3','4','5','6','7','8','9','','0','DEL'].map((k, i) =>
+                k === '' ? <div key={i} /> : (
+                  <button key={i} onClick={() => press(k)}
+                    aria-label={k === 'DEL' ? 'Delete last digit' : `Digit ${k}`}
+                    className={clsx(
+                      'pin-key rounded-xl font-bold transition-all duration-100 active:scale-95 border select-none',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 focus-visible:ring-offset-1',
+                      k === 'DEL'
+                        ? 'bg-gray-100 text-gray-500 text-xs border-gray-200 hover:bg-gray-200'
+                        : 'bg-white text-gray-900 border-gray-200 hover:bg-yellow-50 hover:border-yellow-300 shadow-sm hover:shadow-md'
+                    )}
+                    style={{ height: '52px', fontSize: '18px', fontFamily: 'var(--font-display)' }}>
+                    {k}
+                  </button>
+                )
+              )}
+            </div>
+          </>
         )}
 
-        <div className="grid grid-cols-3 gap-2.5 w-full max-w-[240px]">
-          {['1','2','3','4','5','6','7','8','9','','0','DEL'].map((k, i) =>
-            k === '' ? <div key={i} /> : (
-              <button key={i} onClick={() => press(k)}
-                className={clsx(
-                  'h-14 rounded-xl font-bold text-lg transition-all duration-100 active:scale-95 border select-none',
-                  k === 'DEL'
-                    ? 'bg-gray-100 text-gray-500 text-sm border-gray-200 hover:bg-gray-200'
-                    : 'bg-white text-gray-900 border-gray-200 hover:bg-yellow-50 hover:border-yellow-300 shadow-sm hover:shadow-md'
-                )}
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                {k}
-              </button>
-            )
-          )}
-        </div>
-        <Btn onClick={() => resolvePinModal(false)} variant="ghost" size="sm">Cancel</Btn>
+        <Btn onClick={() => resolvePinModal({ verified: false })} variant="ghost" size="sm">Cancel</Btn>
       </div>
     </Modal>
   );
@@ -422,7 +660,7 @@ function SaleReceipt({ sale, settings }: { sale: SaleDetail; settings: SettingsT
   return (
     <div id="receipt-print" className="bg-white text-gray-900 p-4 text-xs font-mono max-w-[280px] mx-auto">
       <div className="text-center mb-3">
-        <div className="text-lg font-bold">{settings.store_name ?? 'MangoWarrior'}</div>
+        <div className="text-lg font-bold">{settings.store_name ?? 'Mango Warrior'}</div>
         <div>{settings.store_address}</div>
         <div>{settings.store_contact}</div>
       </div>
@@ -482,24 +720,58 @@ function LoginPage() {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [locked, setLocked] = useState(false);
+  const [lockSecs, setLockSecs] = useState(0);
+
+  // Lockout countdown
+  useEffect(() => {
+    if (!locked) return;
+    const iv = setInterval(() => {
+      const secs = pinLockoutState.secondsLeft();
+      if (secs <= 0) { setLocked(false); setLockSecs(0); clearInterval(iv); }
+      else setLockSecs(secs);
+    }, 500);
+    return () => clearInterval(iv);
+  }, [locked]);
 
   const doLogin = useCallback(async (pinValue: string, user: User) => {
+    if (pinLockoutState.isLocked()) {
+      setLocked(true); setLockSecs(pinLockoutState.secondsLeft()); setPin(''); return;
+    }
     try {
       const res = await login.mutateAsync({ user_id: user.id, pin: pinValue });
+      pinLockoutState.reset();
       authLogin(res.user, res.token);
       navigate(res.user.role === 'admin' ? 'admin_dashboard' : 'pos');
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Invalid PIN');
+      pinLockoutState.increment();
+      if (pinLockoutState.isLocked()) {
+        setLocked(true); setLockSecs(pinLockoutState.secondsLeft());
+        setError(`Too many attempts. Locked for ${pinLockoutState.secondsLeft()}s.`);
+      } else {
+        setError(`Invalid PIN. ${PIN_MAX_ATTEMPTS - pinLockoutState.attempts} attempt(s) left.`);
+      }
       setPin('');
     }
   }, [login, authLogin, navigate]);
 
+  useEffect(() => {
+    if (!selectedUser) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key >= '0' && e.key <= '9') pressPin(e.key);
+      else if (e.key === 'Backspace') pressPin('DEL');
+      else if (e.key === 'Escape') { setSelectedUser(null); setPin(''); setError(''); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedUser, pin]);
+
   const pressPin = (val: string) => {
+    if (locked) return;
     if (val === 'DEL') { setPin(p => p.slice(0, -1)); setError(''); return; }
     if (pin.length >= 6) return;
     const next = pin + val;
-    setPin(next);
-    setError('');
+    setPin(next); setError('');
     if (next.length === 6 && selectedUser) setTimeout(() => doLogin(next, selectedUser), 50);
   };
 
@@ -528,7 +800,7 @@ function LoginPage() {
             <span className="text-4xl" style={{ lineHeight: 1 }}>🥭</span>
           </div>
           <div className="text-4xl font-black mb-1" style={{ fontFamily: 'var(--font-display)' }}>
-            <span style={{ color: '#E8A000' }}>Mango</span>
+            <span style={{ color: '#E8A000' }}>Mango </span>
             <span style={{ color: 'var(--warrior-red)' }}>Warrior</span>
           </div>
           <div className="text-gray-500 text-sm font-medium tracking-wide">Point of Sale System</div>
@@ -539,12 +811,14 @@ function LoginPage() {
           {!selectedUser ? (
             <div>
               <p className="text-gray-400 text-sm text-center mb-4 font-medium">Who's working today?</p>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2" role="list">
                 {(usersList ?? []).map((u: User) => (
                   <button key={u.id}
+                    role="listitem"
                     onClick={() => { setSelectedUser(u); setPin(''); setError(''); }}
                     className="flex items-center gap-3.5 p-3.5 bg-gray-50 hover:bg-yellow-50 border border-gray-200
-                      hover:border-yellow-300 rounded-2xl transition-all text-left group active:scale-98">
+                      hover:border-yellow-300 rounded-2xl transition-all text-left group active:scale-98
+                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400">
                     <div className="w-11 h-11 rounded-2xl flex items-center justify-center font-black text-amber-900 text-base shrink-0 shadow-sm"
                       style={{ backgroundColor: 'var(--mango-yellow)', fontFamily: 'var(--font-display)' }}>
                       {u.name[0].toUpperCase()}
@@ -559,52 +833,71 @@ function LoginPage() {
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center gap-5">
+            <div className="flex flex-col items-center" style={{ gap: '14px' }}>
               <button onClick={() => { setSelectedUser(null); setPin(''); setError(''); }}
-                className="flex items-center gap-1.5 text-gray-400 hover:text-gray-700 text-sm transition-colors self-start font-medium">
+                className="flex items-center gap-1.5 text-gray-400 hover:text-gray-700 text-sm transition-colors self-start font-medium
+                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 rounded-lg px-1">
                 <ArrowLeft size={14} /> Back
               </button>
-              <div className="w-20 h-20 rounded-3xl flex items-center justify-center font-black text-3xl text-amber-900 shadow-md"
+              <div className="w-16 h-16 rounded-3xl flex items-center justify-center font-black text-2xl text-amber-900 shadow-md"
                 style={{ backgroundColor: 'var(--mango-yellow)', fontFamily: 'var(--font-display)', boxShadow: 'var(--shadow-mango)' }}>
                 {selectedUser.name[0].toUpperCase()}
               </div>
               <div className="text-center">
-                <div className="text-gray-900 font-800 text-xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>{selectedUser.name}</div>
-                <div className="text-gray-400 text-xs capitalize mt-0.5 tracking-wide">{selectedUser.role}</div>
+                <div className="text-gray-900 font-800 text-lg" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>{selectedUser.name}</div>
+                <div className="text-gray-400 text-xs capitalize tracking-wide">{selectedUser.role}</div>
               </div>
-              <div className="flex gap-3">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className={clsx(
-                    'w-12 h-12 rounded-full border-2 flex items-center justify-center transition-all duration-150',
-                    i < pin.length
-                      ? 'border-yellow-400 shadow-[0_0_0_4px_rgba(249,214,76,0.15)]'
-                      : 'border-gray-200 bg-gray-50'
-                  )} style={i < pin.length ? { backgroundColor: 'var(--mango-yellow)' } : {}}>
-                    {i < pin.length && <span className="text-amber-900 font-black text-sm">●</span>}
+
+              {locked ? (
+                <div className="flex flex-col items-center gap-2 py-4">
+                  <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center">
+                    <AlertTriangle size={24} className="text-red-500" />
                   </div>
-                ))}
-              </div>
-              {error && (
-                <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 px-4 py-2.5 rounded-xl border border-red-100 w-full justify-center font-medium">
-                  <AlertTriangle size={14} /> {error}
+                  <p className="text-red-600 font-700 text-sm text-center" style={{ fontWeight: 700 }}>PIN entry locked</p>
+                  <p className="text-gray-500 text-xs text-center">Try again in <span className="font-bold text-red-600">{lockSecs}s</span></p>
                 </div>
+              ) : (
+                <>
+                  <div className="flex" style={{ gap: '8px' }} role="status" aria-live="polite">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i}
+                        className="rounded-full border-2 flex items-center justify-center transition-all duration-150"
+                        style={{
+                          width: '36px', height: '36px',
+                          borderColor: i < pin.length ? 'var(--mango-yellow)' : '#E4E4E7',
+                          backgroundColor: i < pin.length ? 'var(--mango-yellow)' : '#F4F4F5',
+                        }}>
+                        {i < pin.length && <span className="text-amber-900 font-black" style={{ fontSize: '9px' }}>●</span>}
+                      </div>
+                    ))}
+                  </div>
+
+                  {error && (
+                    <div className="flex items-center gap-2 text-red-600 text-xs bg-red-50 px-3 py-2 rounded-xl border border-red-100 w-full justify-center font-medium" role="alert">
+                      <AlertTriangle size={12} /> {error}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-3 w-full" style={{ gap: '7px', maxWidth: '210px' }} role="group" aria-label="PIN keypad">
+                    {['1','2','3','4','5','6','7','8','9','','0','DEL'].map((k, i) =>
+                      k === '' ? <div key={i} /> : (
+                        <button key={i} onClick={() => pressPin(k)}
+                          aria-label={k === 'DEL' ? 'Delete last digit' : `Digit ${k}`}
+                          className={clsx(
+                            'rounded-xl font-bold transition-all duration-100 active:scale-95 border select-none',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                            k === 'DEL'
+                              ? 'bg-gray-100 text-gray-500 text-xs border-gray-200 hover:bg-gray-200'
+                              : 'bg-white text-gray-900 border-gray-200 hover:bg-yellow-50 hover:border-yellow-300 shadow-sm'
+                          )}
+                          style={{ height: '50px', fontSize: '18px', fontFamily: 'var(--font-display)' }}>
+                          {k}
+                        </button>
+                      )
+                    )}
+                  </div>
+                </>
               )}
-              <div className="grid grid-cols-3 gap-2.5 w-full max-w-[240px]">
-                {['1','2','3','4','5','6','7','8','9','','0','DEL'].map((k, i) =>
-                  k === '' ? <div key={i} /> : (
-                    <button key={i} onClick={() => pressPin(k)}
-                      className={clsx(
-                        'h-14 rounded-xl font-bold text-lg transition-all duration-100 active:scale-95 border select-none',
-                        k === 'DEL'
-                          ? 'bg-gray-100 text-gray-500 text-sm border-gray-200 hover:bg-gray-200'
-                          : 'bg-white text-gray-900 border-gray-200 hover:bg-yellow-50 hover:border-yellow-300 shadow-sm hover:shadow-md'
-                      )}
-                      style={{ fontFamily: 'var(--font-display)' }}>
-                      {k}
-                    </button>
-                  )
-                )}
-              </div>
             </div>
           )}
         </div>
@@ -620,10 +913,28 @@ function Header() {
   const { data: shift } = useCurrentShift();
   const openPinModal = useUIStore(s => s.openPinModal);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Track fullscreen state
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch { /* ignore */ }
+  };
 
   const handleLogout = async () => {
-    const ok = await openPinModal();
-    if (!ok) return;
+    const result = await openPinModal();
+    if (!result.verified) return;
     fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${useAuthStore.getState().token}` } });
     logout();
   };
@@ -639,6 +950,16 @@ function Header() {
   ];
   const visible = navItems.filter(n => !n.adminOnly || user?.role === 'admin');
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.altKey) return;
+      const idx = parseInt(e.key) - 1;
+      if (idx >= 0 && idx < visible.length) { navigate(visible[idx].page); e.preventDefault(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [visible]);
+
   return (
     <header className="flex items-center h-14 px-4 bg-white border-b border-gray-150 shrink-0 z-30 relative"
       style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.04)' }}>
@@ -647,7 +968,7 @@ function Header() {
         <div className="w-7 h-7 rounded-lg flex items-center justify-center text-sm shrink-0"
           style={{ backgroundColor: 'var(--mango-yellow)' }}>🥭</div>
         <span className="hidden sm:inline">
-          <span style={{ color: '#D97706' }}>Mango</span><span style={{ color: 'var(--warrior-red)' }}>Warrior</span>
+          <span style={{ color: '#D97706' }}>Mango </span><span style={{ color: 'var(--warrior-red)' }}>Warrior</span>
         </span>
       </div>
 
@@ -663,13 +984,16 @@ function Header() {
         </div>
       </div>
 
-      <nav className="hidden md:flex items-center gap-1 flex-1">
-        {visible.map((n) => {
+      <nav className="hidden md:flex items-center gap-1 flex-1" aria-label="Main navigation">
+        {visible.map((n, idx) => {
           const isActive = page === n.page;
           return (
             <button key={n.page} onClick={() => navigate(n.page)}
+              aria-current={isActive ? 'page' : undefined}
+              title={`${n.label} (Alt+${idx + 1})`}
               className={clsx(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all duration-150',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                 isActive ? 'text-amber-900' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
               )}
               style={isActive ? { backgroundColor: 'var(--mango-yellow-lt)', color: '#78350f', fontWeight: 700 } : {}}>
@@ -682,7 +1006,9 @@ function Header() {
 
       <div className="md:hidden flex-1">
         <button onClick={() => setMenuOpen(v => !v)}
-          className="text-gray-500 hover:text-gray-900 p-2 rounded-xl hover:bg-gray-100 transition-colors">
+          aria-expanded={menuOpen}
+          aria-label="Open navigation menu"
+          className="text-gray-500 hover:text-gray-900 p-2 rounded-xl hover:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400">
           <MenuIcon size={18} />
         </button>
         {menuOpen && (
@@ -691,8 +1017,10 @@ function Header() {
               const isActive = page === n.page;
               return (
                 <button key={n.page} onClick={() => { navigate(n.page); setMenuOpen(false); }}
+                  aria-current={isActive ? 'page' : undefined}
                   className={clsx(
                     'flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                     isActive ? 'text-amber-900' : 'text-gray-600 hover:bg-gray-50'
                   )}
                   style={isActive ? { backgroundColor: 'var(--mango-yellow-lt)', color: '#78350f' } : {}}>
@@ -704,7 +1032,16 @@ function Header() {
         )}
       </div>
 
-      <div className="flex items-center gap-3 ml-auto">
+      <div className="flex items-center gap-2 ml-auto">
+        {/* Fullscreen toggle */}
+        <button
+          onClick={toggleFullscreen}
+          title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+          className="text-gray-400 hover:text-gray-700 p-2 rounded-xl hover:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
+        >
+          {isFullscreen ? <Minimize size={15} /> : <Maximize size={15} />}
+        </button>
+
         <div className="hidden sm:flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center font-black text-amber-900 text-sm"
             style={{ backgroundColor: 'var(--mango-yellow)', fontFamily: 'var(--font-display)' }}>
@@ -716,7 +1053,8 @@ function Header() {
           </div>
         </div>
         <button onClick={handleLogout}
-          className="text-gray-400 hover:text-red-500 transition-colors p-2 rounded-xl hover:bg-red-50 border border-transparent hover:border-red-100"
+          className="text-gray-400 hover:text-red-500 transition-colors p-2 rounded-xl hover:bg-red-50 border border-transparent hover:border-red-100
+            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
           title="Sign Out">
           <LogOut size={15} />
         </button>
@@ -756,7 +1094,7 @@ function CartAddonPickerModal({
         {availableAddons.length === 0 ? (
           <p className="text-gray-400 text-sm text-center py-6">No add-ons available</p>
         ) : (
-          <div className="flex flex-col gap-2 max-h-72 overflow-y-auto">
+          <div className="flex flex-col gap-2 max-h-64 overflow-y-auto scrollable">
             {availableAddons.map((addon) => {
               const sel = selected.find(a => a.addon_id === addon.id);
               return (
@@ -765,11 +1103,10 @@ function CartAddonPickerModal({
                     'flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-all duration-150 cursor-pointer',
                     sel ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200 bg-white hover:border-gray-300'
                   )}
-                  onClick={() => toggleAddon(addon)}>
-                  <div className={clsx(
-                    'w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all',
-                    sel ? 'border-yellow-500 bg-yellow-400' : 'border-gray-300'
-                  )}>
+                  onClick={() => toggleAddon(addon)}
+                  role="checkbox" aria-checked={!!sel} tabIndex={0}
+                  onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggleAddon(addon); } }}>
+                  <div className={clsx('w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all', sel ? 'border-yellow-500 bg-yellow-400' : 'border-gray-300')}>
                     {sel && <span className="text-amber-900 text-xs font-black" style={{ lineHeight: 1 }}>✓</span>}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -778,12 +1115,12 @@ function CartAddonPickerModal({
                   </div>
                   {sel && (
                     <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
-                      <button onClick={() => changeQty(addon.id, -1)}
+                      <button onClick={() => changeQty(addon.id, -1)} aria-label="Decrease quantity"
                         className="w-7 h-7 rounded-lg bg-white border border-gray-200 hover:bg-gray-100 flex items-center justify-center text-gray-600 shadow-sm transition-colors">
                         <Minus size={10} />
                       </button>
                       <span className="w-5 text-center text-sm font-800 text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>{sel.qty}</span>
-                      <button onClick={() => changeQty(addon.id, 1)}
+                      <button onClick={() => changeQty(addon.id, 1)} aria-label="Increase quantity"
                         className="w-7 h-7 rounded-lg bg-white border border-yellow-200 hover:bg-yellow-50 flex items-center justify-center text-amber-700 shadow-sm transition-colors">
                         <Plus size={10} />
                       </button>
@@ -815,6 +1152,7 @@ function POSPage() {
   const { data: menuData, isLoading: menuLoading } = useMenu();
   const { data: settings } = useSettings();
   const { data: shift } = useCurrentShift();
+  const { data: heldOrders } = useHeldOrders();
 
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [searchQ, setSearchQ] = useState('');
@@ -823,6 +1161,8 @@ function POSPage() {
   const [showShift, setShowShift] = useState(false);
   const [sizeModal, setSizeModal] = useState<{ item: MenuItem } | null>(null);
   const [mobileTab, setMobileTab] = useState<'menu' | 'cart'>('menu');
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (settings) {
@@ -832,6 +1172,19 @@ function POSPage() {
       );
     }
   }, [settings]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey && e.key === 'f') || (e.key === '/' && !['INPUT','TEXTAREA'].includes((e.target as HTMLElement).tagName))) {
+        e.preventDefault(); searchRef.current?.focus();
+      }
+      if (e.ctrlKey && e.key === 'Enter') {
+        if (cart.cart.items.length > 0) setShowCheckout(true);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [cart.cart.items.length]);
 
   const categories = menuData?.categories ?? [];
   const allAddons = menuData?.addons ?? [];
@@ -870,51 +1223,25 @@ function POSPage() {
 
   const total = cart.total();
   const itemCount = cart.cart.items.reduce((s, i) => s + i.qty, 0);
+  const heldCount = heldOrders?.length ?? 0;
 
-  // ── CHANGED: full-card colored background per category ──
+  // ── Item card — name only, smaller widget, bigger font, two lines centered ──
   const renderItemCard = (item: MenuItem, colorIdx: number) => {
     const color = getCategoryColor(colorIdx);
-    const minPrice = Math.min(...item.sizes.map((s: ItemSize) => s.price));
 
     return (
       <button
         key={item.id}
         onClick={() => handleItemTap(item)}
-        className="item-card group rounded-2xl p-3.5 text-left flex flex-col gap-1.5 relative overflow-hidden border-2"
-        style={{
-          backgroundColor: color.cardBg,
-          borderColor: color.cardBorder,
-          boxShadow: 'var(--shadow-sm)',
-        }}
+        className={`item-card-solid group ${color.cardClass}`}
+        aria-label={item.name}
+        style={{ minHeight: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       >
-        {/* subtle inner glow strip at top */}
-        <div className="absolute top-0 left-0 right-0 h-1 rounded-t-2xl opacity-70"
-          style={{ backgroundColor: color.pill }} />
-
         <div
-          className="text-sm font-700 leading-snug line-clamp-2 flex-1 mt-0.5"
-          style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: color.cardText }}
+          className="ic-text text-base font-700 leading-tight text-center px-2 line-clamp-2"
+          style={{ fontFamily: 'var(--font-display)', fontWeight: 700, wordBreak: 'break-word' }}
         >
           {item.name}
-        </div>
-
-        <div className="flex items-end justify-between gap-1 mt-auto">
-          <div>
-            <div className="text-sm font-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 800, color: color.cardSubText }}>
-              {item.sizes.length > 1 ? `from ${fmt(minPrice)}` : fmt(minPrice)}
-            </div>
-            {item.sizes.length > 1 && (
-              <div className="text-xs mt-0.5 font-medium" style={{ color: color.cardSubText, opacity: 0.7 }}>
-                {item.sizes.length} sizes
-              </div>
-            )}
-          </div>
-          <div
-            className="w-7 h-7 rounded-xl flex items-center justify-center transition-all group-hover:scale-110 shrink-0"
-            style={{ backgroundColor: color.pill, color: color.pillText }}
-          >
-            <Plus size={13} />
-          </div>
         </div>
       </button>
     );
@@ -939,48 +1266,54 @@ function POSPage() {
           mobileTab === 'cart' ? 'hidden md:flex' : 'flex'
         )} style={{ background: 'var(--surface-page)' }}>
 
-          <div className="px-3 pt-3 pb-2 bg-white border-b border-gray-150 shrink-0"
+          {/* Search + category filter bar */}
+          <div className="px-3 pt-3 pb-2.5 bg-white border-b border-gray-150 shrink-0"
             style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.04)' }}>
-            <div className="relative mb-3">
+            <div className="relative mb-2.5">
               <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               <input
+                ref={searchRef}
                 type="text"
-                placeholder="Search menu items…"
+                placeholder="Search menu… (/ or Ctrl+F)"
                 value={searchQ}
                 onChange={e => setSearchQ(e.target.value)}
+                aria-label="Search menu items"
                 className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl pl-10 pr-10 py-2.5 text-sm
                   focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20
                   placeholder-gray-400 font-medium transition-colors"
               />
               {searchQ && (
-                <button onClick={() => setSearchQ('')}
+                <button onClick={() => setSearchQ('')} aria-label="Clear search"
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 transition-colors">
                   <X size={14} />
                 </button>
               )}
             </div>
 
-            <div className="flex gap-2 overflow-x-auto pb-0.5 no-scrollbar">
+            {/* Category pills */}
+            <div className="flex gap-1.5 overflow-x-auto pb-0.5 no-scrollbar scrollable-x" role="tablist" aria-label="Filter by category">
               <button
+                role="tab" aria-selected={activeCategory === 'all'}
                 onClick={() => setActiveCategory('all')}
-                className="shrink-0 px-4 py-1.5 rounded-full text-xs font-700 transition-all border"
+                className="shrink-0 px-3.5 py-1 rounded-full text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                 style={
                   activeCategory === 'all'
-                    ? { backgroundColor: 'var(--mango-yellow)', color: '#78350f', borderColor: 'var(--mango-yellow)', fontWeight: 700, boxShadow: 'var(--shadow-mango)' }
+                    ? { backgroundColor: '#18181B', color: '#fff', borderColor: '#18181B', fontWeight: 700 }
                     : { backgroundColor: '#fff', color: '#71717A', borderColor: '#E4E4E7', fontWeight: 600 }
                 }>
-                All Items
+                All
               </button>
               {categories.map((c: Category, idx: number) => {
                 const color = getCategoryColor(idx);
                 const isActive = activeCategory === c.id;
                 return (
                   <button key={c.id}
+                    role="tab" aria-selected={isActive}
                     onClick={() => setActiveCategory(c.id)}
-                    className="shrink-0 px-4 py-1.5 rounded-full text-xs font-700 transition-all border"
+                    className="shrink-0 px-3.5 py-1 rounded-full text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                     style={isActive
-                      ? { backgroundColor: color.pill, color: color.pillText, borderColor: color.pill, fontWeight: 700, boxShadow: `0 2px 8px ${color.pill}40` }
-                      : { backgroundColor: '#fff', color: color.pill, borderColor: color.pill + '50', fontWeight: 600 }
+                      ? { backgroundColor: color.pill, color: '#fff', borderColor: color.pill, fontWeight: 700, boxShadow: `0 2px 8px ${color.pill}50` }
+                      : { backgroundColor: '#fff', color: color.pill, borderColor: color.pill + '55', fontWeight: 600 }
                     }>
                     {c.name}
                   </button>
@@ -989,11 +1322,12 @@ function POSPage() {
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-3">
+          {/* Items grid */}
+          <div className="flex-1 overflow-y-auto p-3 scrollable">
             {menuLoading ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
-                {Array.from({ length: 10 }).map((_, i) => (
-                  <div key={i} className="h-24 shimmer rounded-2xl" />
+              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5">
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <div key={i} className="shimmer rounded-2xl" style={{ aspectRatio: '1/1' }} />
                 ))}
               </div>
             ) : filteredItems.length === 0 ? (
@@ -1003,24 +1337,20 @@ function POSPage() {
                 {searchQ && <p className="text-gray-300 text-xs mt-1">Try a different search</p>}
               </div>
             ) : (
-              <div className="space-y-5">
+              <div className="space-y-4">
                 {groupedItems.map(({ category, items, colorIdx }) => {
                   const color = getCategoryColor(colorIdx);
                   const showSection = activeCategory === 'all' || activeCategory === category.id;
                   if (!showSection) return null;
                   return (
                     <div key={category.id}>
-                      <div className="flex items-center gap-2.5 mb-2.5">
-                        <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
-                          style={{ backgroundColor: color.pill + '20' }}>
-                          <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color.pill }} />
-                        </div>
-                        <span className="text-xs font-800 uppercase tracking-widest text-gray-500"
-                          style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>{category.name}</span>
-                        <div className="flex-1 h-px bg-gray-150" />
-                        <span className="text-xs text-gray-400 font-medium shrink-0">{items.length} items</span>
+                      <div className="cat-divider">
+                        <div className="cat-divider-dot" style={{ backgroundColor: color.pill }} />
+                        <span className="cat-divider-label">{category.name}</span>
+                        <div className="cat-divider-line" />
+                        <span className="cat-divider-count">{items.length}</span>
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
+                      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2" role="list" aria-label={`${category.name} items`}>
                         {items.map(item => renderItemCard(item, colorIdx))}
                       </div>
                     </div>
@@ -1028,15 +1358,12 @@ function POSPage() {
                 })}
                 {uncategorizedItems.length > 0 && (
                   <div>
-                    <div className="flex items-center gap-2.5 mb-2.5">
-                      <div className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 bg-gray-100">
-                        <div className="w-2.5 h-2.5 rounded-full bg-gray-400" />
-                      </div>
-                      <span className="text-xs font-800 uppercase tracking-widest text-gray-400"
-                        style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Other</span>
-                      <div className="flex-1 h-px bg-gray-150" />
+                    <div className="cat-divider">
+                      <div className="cat-divider-dot" style={{ backgroundColor: '#A1A1AA' }} />
+                      <span className="cat-divider-label">Other</span>
+                      <div className="cat-divider-line" />
                     </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
+                    <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
                       {uncategorizedItems.map(item => renderItemCard(item, categories.length))}
                     </div>
                   </div>
@@ -1048,13 +1375,15 @@ function POSPage() {
 
         {/* ── Cart panel ── */}
         <div className={clsx(
-          'flex flex-col bg-white border-l border-gray-150 shrink-0',
+          'flex flex-col bg-white border-l border-gray-150 shrink-0 cart-panel-tablet',
           'w-full md:w-72 lg:w-80 xl:w-88',
           mobileTab === 'menu' ? 'hidden md:flex' : 'flex'
         )}>
-          <div className="px-4 py-3 border-b border-gray-100 shrink-0 flex items-center justify-between">
+          {/* Cart header */}
+          <div className="px-4 py-3 border-b border-gray-100 shrink-0 flex items-center justify-between"
+            style={{ background: 'linear-gradient(90deg, #FFFBEB 0%, #fff 60%)' }}>
             <div className="flex items-center gap-2">
-              <ShoppingCart size={15} className="text-gray-400" />
+              <ShoppingCart size={15} className="text-amber-600" />
               <span className="text-sm font-700 text-gray-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
                 Order
               </span>
@@ -1065,15 +1394,32 @@ function POSPage() {
                 </div>
               )}
             </div>
-            {cart.cart.items.length > 0 && (
-              <button onClick={() => cart.clearCart()}
-                className="text-xs text-gray-400 hover:text-red-500 font-medium transition-colors flex items-center gap-1">
-                <Trash2 size={11} /> Clear
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setShowHeld(true)}
+                title="Parked orders"
+                className="relative p-2 rounded-xl text-gray-500 hover:text-amber-700 hover:bg-yellow-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
+              >
+                <Receipt size={15} />
+                {heldCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center font-800 text-white"
+                    style={{ backgroundColor: 'var(--warrior-red)', fontSize: '9px', fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+                    {heldCount}
+                  </span>
+                )}
               </button>
-            )}
+              {cart.cart.items.length > 0 && (
+                <button
+                  onClick={() => setShowClearConfirm(true)}
+                  aria-label="Clear cart"
+                  className="text-xs text-gray-400 hover:text-red-500 font-medium transition-colors flex items-center gap-1 rounded-lg px-1.5 py-1 hover:bg-red-50">
+                  <Trash2 size={11} /> Clear
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-3 py-3">
+          <div className="flex-1 overflow-y-auto px-3 py-3 scrollable">
             {cart.cart.items.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full min-h-[120px] text-center py-8">
                 <div className="w-14 h-14 rounded-2xl bg-gray-50 flex items-center justify-center mb-3">
@@ -1083,7 +1429,7 @@ function POSPage() {
                 <p className="text-xs text-gray-300 mt-1">Tap any item to add it</p>
               </div>
             ) : (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2.5">
                 {cart.cart.items.map((item: CartItem) => (
                   <CartItemRow key={item.cart_key} item={item} allAddons={allAddons} />
                 ))}
@@ -1126,20 +1472,12 @@ function POSPage() {
 
             <div className="flex gap-2">
               <Btn
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowHeld(true)}
-                disabled={cart.cart.items.length === 0}
-                className="flex-1"
-              >
-                Hold
-              </Btn>
-              <Btn
                 variant="mango"
                 size="md"
-                className="flex-[2]"
+                fullWidth
                 onClick={() => setShowCheckout(true)}
                 disabled={cart.cart.items.length === 0}
+                title="Proceed to payment (Ctrl+Enter)"
               >
                 <Receipt size={15} />
                 Pay {itemCount > 0 && `· ${itemCount}`}
@@ -1148,7 +1486,8 @@ function POSPage() {
 
             {shift && (
               <button onClick={() => setShowShift(true)}
-                className="w-full mt-2.5 text-xs text-gray-400 hover:text-gray-600 transition-colors font-medium text-center">
+                className="w-full mt-2 text-xs text-gray-400 hover:text-gray-600 transition-colors font-medium text-center
+                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 rounded-lg py-1">
                 Shift actions ›
               </button>
             )}
@@ -1156,33 +1495,32 @@ function POSPage() {
         </div>
       </div>
 
-      <div className="md:hidden flex border-t border-gray-200 bg-white shrink-0 safe-area-inset-bottom">
+      {/* ── Mobile bottom tab bar ── */}
+      <div className="md:hidden flex border-t border-gray-200 bg-white shrink-0" role="tablist">
         <button
+          role="tab" aria-selected={mobileTab === 'menu'}
           onClick={() => setMobileTab('menu')}
           className={clsx(
-            'flex-1 flex flex-col items-center py-3 text-xs font-700 gap-1 transition-colors',
+            'flex-1 flex flex-col items-center py-2.5 text-xs font-700 gap-1 transition-colors',
             mobileTab === 'menu' ? 'text-amber-700' : 'text-gray-400'
           )}
           style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-          <div className={clsx(
-            'w-8 h-8 rounded-xl flex items-center justify-center transition-all',
-            mobileTab === 'menu' ? 'text-amber-700' : 'text-gray-400'
-          )} style={mobileTab === 'menu' ? { backgroundColor: 'var(--mango-yellow-lt)' } : {}}>
+          <div className={clsx('w-8 h-8 rounded-xl flex items-center justify-center transition-all', mobileTab === 'menu' ? 'text-amber-700' : 'text-gray-400')}
+            style={mobileTab === 'menu' ? { backgroundColor: 'var(--mango-yellow-lt)' } : {}}>
             <Coffee size={17} />
           </div>
           Menu
         </button>
         <button
+          role="tab" aria-selected={mobileTab === 'cart'}
           onClick={() => setMobileTab('cart')}
           className={clsx(
-            'flex-1 flex flex-col items-center py-3 text-xs font-700 gap-1 transition-colors relative',
+            'flex-1 flex flex-col items-center py-2.5 text-xs font-700 gap-1 transition-colors relative',
             mobileTab === 'cart' ? 'text-amber-700' : 'text-gray-400'
           )}
           style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-          <div className={clsx(
-            'w-8 h-8 rounded-xl flex items-center justify-center transition-all relative',
-            mobileTab === 'cart' ? 'text-amber-700' : 'text-gray-400'
-          )} style={mobileTab === 'cart' ? { backgroundColor: 'var(--mango-yellow-lt)' } : {}}>
+          <div className={clsx('w-8 h-8 rounded-xl flex items-center justify-center transition-all relative', mobileTab === 'cart' ? 'text-amber-700' : 'text-gray-400')}
+            style={mobileTab === 'cart' ? { backgroundColor: 'var(--mango-yellow-lt)' } : {}}>
             <ShoppingCart size={17} />
             {itemCount > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-white flex items-center justify-center font-800"
@@ -1193,7 +1531,34 @@ function POSPage() {
           </div>
           Cart
         </button>
+        <button
+          role="tab" aria-selected={false}
+          onClick={() => setShowHeld(true)}
+          className="flex-1 flex flex-col items-center py-2.5 text-xs font-700 gap-1 transition-colors relative text-gray-400"
+          style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center transition-all relative text-gray-400">
+            <Receipt size={17} />
+            {heldCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-white flex items-center justify-center font-800"
+                style={{ backgroundColor: 'var(--warrior-red)', fontSize: '9px', fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+                {heldCount}
+              </span>
+            )}
+          </div>
+          Parked
+        </button>
       </div>
+
+      {/* Clear cart confirm */}
+      <ConfirmDialog
+        open={showClearConfirm}
+        onClose={() => setShowClearConfirm(false)}
+        onConfirm={() => cart.clearCart()}
+        title="Clear Cart"
+        message={`Remove all ${itemCount} item(s) from the cart?`}
+        confirmLabel="Clear Cart"
+        variant="danger"
+      />
 
       {sizeModal && (
         <SizePickerModal item={sizeModal.item} allAddons={allAddons} onClose={() => setSizeModal(null)} onAdd={addToCart} />
@@ -1212,41 +1577,35 @@ function POSPage() {
   );
 }
 
-// ─── Cart Item Row ─────────────────────────────────────────────
-// CHANGED: restructured into two clear rows:
-//   Row 1 → item name | size | price (right-aligned)
-//   Row 2 → qty stepper | Add-ons btn | SC | PWD | ✕
+// ─── Cart Item Row — NEW LAYOUT ────────────────────────────────
+// Row 1: ITEM NAME | SIZE | PRICE
+// Row 2: QTY BUTTONS | ADD-ONS BTN
+// Row 3: DISCOUNT: SC PWD
 function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }) {
   const cart = useCartStore();
   const [showAddonPicker, setShowAddonPicker] = useState(false);
 
-  return (
-    <div className="rounded-2xl border overflow-hidden transition-all"
-      style={{ borderColor: '#E4E4E7', backgroundColor: '#FAFAF9', boxShadow: 'var(--shadow-xs)' }}>
+  const accentColors = ['#F59E0B','#059669','#E11D48','#7C3AED','#0284C7','#EA580C','#DB2777','#0F766E'];
+  const accentColor = accentColors[(cart.cart.items.indexOf(item)) % accentColors.length] ?? '#F59E0B';
 
-      {/* ── Row 1: name + size + price ── */}
-      <div className="flex items-start justify-between gap-2 px-3.5 pt-3 pb-1.5">
-        <div className="flex-1 min-w-0">
-          <span className="text-sm font-700 text-gray-900 leading-snug" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-            {item.item_name}
+  return (
+    <article className="cart-item-row rounded-2xl overflow-hidden border border-gray-200 bg-white shadow-sm" aria-label={`${item.item_name} in cart`}>
+      {/* Accent top bar */}
+      <span className="block h-0.5 w-full" style={{ backgroundColor: accentColor }} />
+
+      {/* Row 1: Item name | Size | Price */}
+      <div className="flex items-start justify-between gap-1.5 px-3 pt-2.5 pb-1">
+        <span className="text-sm font-700 text-gray-900 leading-snug flex-1 min-w-0 truncate" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+          {item.item_name}
+        </span>
+        {item.size_name && (
+          <span className="text-xs px-2 py-0.5 rounded-full font-600 border shrink-0"
+            style={{ backgroundColor: '#F0F9FF', color: '#0277BD', borderColor: '#BAE6FD', fontWeight: 600 }}>
+            {item.size_name}
           </span>
-          {item.size_name && (
-            <span className="ml-2 text-xs text-gray-400 font-medium">{item.size_name}</span>
-          )}
-          {/* add-on tags */}
-          {item.addons.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1">
-              {item.addons.map((a, i) => (
-                <span key={i} className="text-xs px-1.5 py-0.5 rounded-md font-medium"
-                  style={{ backgroundColor: 'var(--leaf-green-lt)', color: 'var(--leaf-green)' }}>
-                  +{a.addon_name}{a.qty > 1 ? ` ×${a.qty}` : ''}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
+        )}
         <div className="text-right shrink-0">
-          <span className="text-base font-800 text-amber-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+          <span className="text-sm font-800 text-amber-900 block" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
             {fmt(item.line_total)}
           </span>
           {item.discount_amount > 0 && (
@@ -1255,62 +1614,70 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
         </div>
       </div>
 
-      {/* ── Row 2: qty | add-ons | SC | PWD | remove ── */}
-      <div className="flex items-center gap-1.5 px-3.5 pb-3 pt-1 flex-wrap">
-        {/* qty stepper */}
-        <div className="flex items-center gap-1 bg-white rounded-xl border border-gray-200 p-0.5 shadow-sm shrink-0">
-          <button onClick={() => cart.updateQty(item.cart_key, -1)}
-            className="w-6 h-6 rounded-lg hover:bg-red-50 hover:text-red-500 flex items-center justify-center text-gray-500 transition-colors">
-            <Minus size={10} />
+      {/* Row 2: Qty controls | Add-ons button */}
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        {/* Qty controls */}
+        <div className="flex items-center gap-1 bg-gray-50 rounded-xl border border-gray-200 p-0.5">
+          <button onClick={() => cart.updateQty(item.cart_key, -1)} aria-label={`Decrease quantity of ${item.item_name}`}
+            className="w-7 h-7 rounded-lg hover:bg-red-50 hover:text-red-500 flex items-center justify-center text-gray-500 transition-colors">
+            <Minus size={11} />
           </button>
-          <span className="w-6 text-center text-sm font-800 text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+          <span className="w-7 text-center text-sm font-800 text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}
+            aria-live="polite">
             {item.qty}
           </span>
-          <button onClick={() => cart.updateQty(item.cart_key, 1)}
-            className="w-6 h-6 rounded-lg hover:bg-green-50 hover:text-green-600 flex items-center justify-center text-gray-500 transition-colors">
-            <Plus size={10} />
+          <button onClick={() => cart.updateQty(item.cart_key, 1)} aria-label={`Increase quantity of ${item.item_name}`}
+            className="w-7 h-7 rounded-lg hover:bg-green-50 hover:text-green-600 flex items-center justify-center text-gray-500 transition-colors">
+            <Plus size={11} />
           </button>
         </div>
 
-        {/* add-ons button */}
-        <button onClick={() => setShowAddonPicker(true)}
-          className="flex items-center gap-1 text-xs font-600 transition-colors px-2 py-1 rounded-lg hover:bg-green-50 border border-transparent hover:border-green-200"
-          style={{ color: 'var(--leaf-green)', fontWeight: 600 }}>
-          <Plus size={10} />
-          {item.addons.length > 0 ? `${item.addons.length} add-on${item.addons.length > 1 ? 's' : ''}` : 'Add-ons'}
-        </button>
-
-        {/* SC button */}
+        {/* Add-ons button */}
         <button
-          onClick={() => cart.setDiscount(item.cart_key, item.discount_type === 'sc' ? null : 'sc')}
-          className={clsx(
-            'px-2 py-1 rounded-lg text-xs font-700 transition-all border',
-            item.discount_type === 'sc'
-              ? 'bg-sky-500 text-white border-sky-500 shadow-sm'
-              : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600 hover:border-gray-300'
+          onClick={() => setShowAddonPicker(true)}
+          className="flex-1 flex items-center gap-1.5 text-xs font-600 transition-colors px-2.5 py-1.5 rounded-xl
+            hover:bg-emerald-50 border border-dashed border-gray-200 hover:border-emerald-300 min-w-0"
+          style={{ color: item.addons.length > 0 ? 'var(--leaf-green)' : '#9CA3AF', fontWeight: 600 }}
+          aria-label={`${item.addons.length > 0 ? 'Edit add-ons' : 'Add add-ons'} for ${item.item_name}`}>
+          <Plus size={11} className="shrink-0" />
+          {item.addons.length > 0
+            ? <span className="truncate">{item.addons.map(a => a.addon_name).join(', ')}</span>
+            : <span className="text-gray-400">Add-ons</span>
+          }
+          {item.addons.length > 0 && (
+            <span className="ml-auto font-700 text-emerald-700 shrink-0 text-xs" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+              +{fmt(item.addons.reduce((s, a) => s + a.addon_price * a.qty, 0))}
+            </span>
           )}
-          style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-          SC
         </button>
 
-        {/* PWD button */}
-        <button
-          onClick={() => cart.setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd')}
-          className={clsx(
-            'px-2 py-1 rounded-lg text-xs font-700 transition-all border',
-            item.discount_type === 'pwd'
-              ? 'bg-violet-500 text-white border-violet-500 shadow-sm'
-              : 'bg-white border-gray-200 text-gray-400 hover:text-gray-600 hover:border-gray-300'
-          )}
-          style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-          PWD
-        </button>
-
-        {/* remove */}
-        <button onClick={() => cart.removeItem(item.cart_key)}
-          className="w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors ml-auto">
+        {/* Remove button */}
+        <button onClick={() => cart.removeItem(item.cart_key)} aria-label={`Remove ${item.item_name}`}
+          className="w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors shrink-0">
           <X size={13} />
         </button>
+      </div>
+
+      {/* Row 3: Discount */}
+      <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
+        <span className="text-xs text-gray-400 font-medium">Discount:</span>
+        <button
+          onClick={() => cart.setDiscount(item.cart_key, item.discount_type === 'sc' ? null : 'sc')}
+          aria-pressed={item.discount_type === 'sc'}
+          className={`discount-btn discount-btn-sc ${item.discount_type === 'sc' ? 'active' : ''}`}>
+          SC
+        </button>
+        <button
+          onClick={() => cart.setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd')}
+          aria-pressed={item.discount_type === 'pwd'}
+          className={`discount-btn discount-btn-pwd ${item.discount_type === 'pwd' ? 'active' : ''}`}>
+          PWD
+        </button>
+        {item.discount_type && (
+          <span className="ml-auto text-xs font-semibold text-emerald-600">
+            −{fmt(item.discount_amount)}
+          </span>
+        )}
       </div>
 
       {showAddonPicker && (
@@ -1321,7 +1688,7 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
           onClose={() => setShowAddonPicker(false)}
         />
       )}
-    </div>
+    </article>
   );
 }
 
@@ -1336,11 +1703,19 @@ function SizePickerModal({
   const [selectedSize, setSelectedSize] = useState(item.sizes[0]);
   const [selectedAddons, setSelectedAddons] = useState<Addon[]>([]);
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const idx = item.sizes.findIndex(s => s.id === selectedSize?.id);
+      if (e.key === 'ArrowDown' && idx < item.sizes.length - 1) setSelectedSize(item.sizes[idx + 1]);
+      if (e.key === 'ArrowUp' && idx > 0) setSelectedSize(item.sizes[idx - 1]);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedSize, item.sizes]);
+
   const toggleAddon = (addon: Addon) => {
     setSelectedAddons(prev =>
-      prev.some(a => a.id === addon.id)
-        ? prev.filter(a => a.id !== addon.id)
-        : [...prev, addon]
+      prev.some(a => a.id === addon.id) ? prev.filter(a => a.id !== addon.id) : [...prev, addon]
     );
   };
 
@@ -1349,25 +1724,26 @@ function SizePickerModal({
 
   return (
     <Modal open onClose={onClose} title={item.name} maxWidth="max-w-sm">
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-4">
         {item.sizes.length > 0 && (
           <div>
             <p className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-3"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Choose Size</p>
-            <div className="flex flex-col gap-2">
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+              Choose Size
+            </p>
+            <div className="flex flex-col gap-2" role="radiogroup">
               {item.sizes.map((s: ItemSize) => {
                 const isActive = selectedSize?.id === s.id;
                 return (
                   <button key={s.id} onClick={() => setSelectedSize(s)}
-                    className="flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-all text-sm font-semibold"
+                    role="radio" aria-checked={isActive}
+                    className="flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-all text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                     style={isActive
                       ? { borderColor: 'var(--mango-yellow)', backgroundColor: 'var(--mango-yellow-xl)', color: '#78350f' }
                       : { borderColor: '#E4E4E7', backgroundColor: '#fff', color: '#3F3F46' }}>
                     <div className="flex items-center gap-3">
-                      <div className={clsx('w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all')}
-                        style={isActive
-                          ? { borderColor: 'var(--mango-yellow)', backgroundColor: 'var(--mango-yellow)' }
-                          : { borderColor: '#D1D1D6' }}>
+                      <div className="w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all"
+                        style={isActive ? { borderColor: 'var(--mango-yellow)', backgroundColor: 'var(--mango-yellow)' } : { borderColor: '#D1D1D6' }}>
                         {isActive && <div className="w-1.5 h-1.5 rounded-full bg-amber-800" />}
                       </div>
                       <span>{s.name}</span>
@@ -1385,21 +1761,22 @@ function SizePickerModal({
         {displayAddons.length > 0 && (
           <div>
             <p className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-3"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Add-ons <span className="normal-case font-medium text-gray-400">(optional)</span></p>
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+              Add-ons <span className="normal-case font-medium text-gray-400">(optional)</span>
+            </p>
             <div className="flex flex-col gap-2">
               {displayAddons.map((a: Addon) => {
                 const active = selectedAddons.some(s => s.id === a.id);
                 return (
                   <button key={a.id} onClick={() => toggleAddon(a)}
-                    className="flex items-center justify-between px-4 py-2.5 rounded-xl border-2 transition-all text-sm"
+                    aria-pressed={active}
+                    className="flex items-center justify-between px-4 py-2.5 rounded-xl border-2 transition-all text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
                     style={active
                       ? { borderColor: 'var(--leaf-green)', backgroundColor: 'var(--leaf-green-lt)' }
                       : { borderColor: '#E4E4E7', backgroundColor: '#fff' }}>
                     <span className="flex items-center gap-2.5">
                       <div className="w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all"
-                        style={active
-                          ? { borderColor: 'var(--leaf-green)', backgroundColor: 'var(--leaf-green)' }
-                          : { borderColor: '#D1D1D6' }}>
+                        style={active ? { borderColor: 'var(--leaf-green)', backgroundColor: 'var(--leaf-green)' } : { borderColor: '#D1D1D6' }}>
                         {active && <span className="text-white text-xs font-black" style={{ lineHeight: 1 }}>✓</span>}
                       </div>
                       <span className={clsx('font-semibold', active ? 'text-emerald-900' : 'text-gray-700')}>{a.name}</span>
@@ -1431,7 +1808,7 @@ function SizePickerModal({
   );
 }
 
-// ─── Checkout Modal ───────────────────────────────────────────
+// ─── Checkout Modal (PIN removed) ───────────────────────────────────────────
 function CheckoutModal({ shift, onClose, onSuccess }: {
   shift: Shift | null | undefined; onClose: () => void; onSuccess: () => void;
 }) {
@@ -1439,7 +1816,6 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   const cart = useCartStore();
   const checkout = useCheckout();
   const { data: settings } = useSettings();
-  const openPinModal = useUIStore(s => s.openPinModal);
   const total = cart.total();
   const [payments, setPayments] = useState<PaymentLine[]>([{ method: 'cash', amount: total }]);
   const [tendered, setTendered] = useState('');
@@ -1468,10 +1844,8 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
     } : p));
   };
 
-  const handleCheckout = async () => {
+  const doCheckout = async () => {
     if (!user) return;
-    const ok = await openPinModal();
-    if (!ok) return;
     try {
       const res = await checkout.mutateAsync({
         idempotency_key: cart.cart.idempotency_key,
@@ -1479,6 +1853,8 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
         order_type: 'dine_in',
         note: cart.cart.note || undefined,
         tendered_amount: hasCash && tendered ? tenderedNum : undefined,
+        actioned_by_user_id: user.id,
+        actioned_by_name: user.name,
         items: cart.cart.items.map((i: CartItem) => ({
           item_id: i.item_id, item_name: i.item_name, size_name: i.size_name,
           base_price: i.base_price, qty: i.qty,
@@ -1534,7 +1910,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
             {hasCash && result.change > 0 && (
               <div className="mt-4 p-4 rounded-2xl border"
                 style={{ backgroundColor: 'var(--mango-yellow-xl)', borderColor: '#FDE68A' }}>
-                <div className="text-amber-600 text-xs font-700 uppercase tracking-wide mb-1" style={{ fontWeight: 700 }}>Change Due</div>
+                <div className="text-amber-600 text-xs font-700 uppercase tracking-wide mb-1">Change Due</div>
                 <div className="font-900 text-4xl text-amber-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 900 }}>
                   {fmt(result.change)}
                 </div>
@@ -1542,7 +1918,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
             )}
           </div>
           {receiptData && settings && (
-            <div className="border border-gray-200 rounded-2xl overflow-hidden max-h-64 overflow-y-auto bg-gray-50">
+            <div className="border border-gray-200 rounded-2xl overflow-hidden max-h-64 overflow-y-auto bg-gray-50 scrollable">
               <SaleReceipt sale={receiptData} settings={settings} />
             </div>
           )}
@@ -1570,9 +1946,6 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
                 <span>Discount applied</span><span>−{fmt(cart.discountTotal())}</span>
               </div>
             )}
-            <div className="text-xs text-amber-700 mt-1 opacity-70">
-              {cart.cart.items.reduce((s, i) => s + i.qty, 0)} item(s)
-            </div>
           </div>
 
           <div>
@@ -1598,7 +1971,8 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
                     onChange={v => updatePayment(i, 'amount', v)} className="flex-1" />
                   {payments.length > 1 && (
                     <button onClick={() => setPayments(prev => prev.filter((_, j) => j !== i))}
-                      className="text-gray-300 hover:text-red-500 p-2 transition-colors mt-0.5">
+                      aria-label="Remove payment line"
+                      className="text-gray-300 hover:text-red-500 p-2 transition-colors mt-0.5 rounded-lg hover:bg-red-50">
                       <X size={14} />
                     </button>
                   )}
@@ -1621,16 +1995,17 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
                 </div>
               )}
               {tendered && tenderedNum < cashPaymentTotal && (
-                <div className="flex items-center gap-2 text-red-600 text-xs mt-2 px-3 py-2 rounded-xl bg-red-50 border border-red-100 font-medium">
+                <div className="flex items-center gap-2 text-red-600 text-xs mt-2 px-3 py-2 rounded-xl bg-red-50 border border-red-100 font-medium" role="alert">
                   <AlertTriangle size={12} /> Amount is less than cash total ({fmt(cashPaymentTotal)})
                 </div>
               )}
-              <div className="flex gap-1.5 mt-2.5 flex-wrap">
+              <div className="flex gap-1.5 mt-2.5 flex-wrap" role="group" aria-label="Quick tender amounts">
                 {[total, Math.ceil(total / 50) * 50, Math.ceil(total / 100) * 100, Math.ceil(total / 500) * 500]
                   .filter((v, i, a) => a.indexOf(v) === i)
                   .map(v => (
                     <button key={v} onClick={() => setTendered(v.toString())}
-                      className="px-3 py-1.5 rounded-xl text-xs font-700 transition-all border hover:shadow-sm"
+                      aria-pressed={tendered === v.toString()}
+                      className="px-3 py-1.5 rounded-xl text-xs font-700 transition-all border hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                       style={{
                         fontFamily: 'var(--font-display)', fontWeight: 700,
                         backgroundColor: tendered === v.toString() ? 'var(--mango-yellow)' : '#fff',
@@ -1645,7 +2020,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
           )}
 
           {!balanced && (
-            <div className="flex items-center justify-between text-sm p-3.5 rounded-2xl border border-red-100 bg-red-50">
+            <div className="flex items-center justify-between text-sm p-3.5 rounded-2xl border border-red-100 bg-red-50" role="alert">
               <span className="text-red-600 font-semibold flex items-center gap-1.5">
                 <AlertTriangle size={14} /> Remaining
               </span>
@@ -1657,7 +2032,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
 
           <div className="flex gap-2.5">
             <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
-            <Btn variant="mango" size="lg" onClick={handleCheckout}
+            <Btn variant="mango" size="lg" onClick={doCheckout}
               disabled={!balanced || !tenderedOk}
               loading={checkout.isPending} className="flex-[2]">
               Confirm Sale
@@ -1669,19 +2044,20 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   );
 }
 
-// ─── Held Orders Modal ────────────────────────────────────────
+// ─── Held Orders Modal ─────────────────────────────────────────
 function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestore: () => void }) {
   const { data: heldOrders, isLoading } = useHeldOrders();
   const createHeld = useCreateHeldOrder();
   const deleteHeld = useDeleteHeldOrder();
   const cart = useCartStore();
   const [label, setLabel] = useState('');
+  const [showHoldForm, setShowHoldForm] = useState(false);
 
   const handleHold = async () => {
     if (cart.cart.items.length === 0) return;
     await createHeld.mutateAsync({ data: cart.cart, label: label || undefined });
     cart.clearCart();
-    toast('Order held');
+    toast('Order parked');
     onClose();
   };
 
@@ -1689,48 +2065,85 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
     cart.loadFromHeld(order.data);
     deleteHeld.mutate(order.id);
     onRestore();
+    toast('Order restored');
   };
 
   return (
-    <Modal open onClose={onClose} title="📋 Held Orders" maxWidth="max-w-md">
+    <Modal open onClose={onClose} title="📋 Parked Orders" maxWidth="max-w-md">
       <div className="flex flex-col gap-4">
         {cart.cart.items.length > 0 && (
-          <div className="rounded-2xl p-4 border" style={{ backgroundColor: 'var(--mango-yellow-xl)', borderColor: '#FDE68A' }}>
-            <p className="text-sm text-amber-900 mb-3 font-700" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-              Hold Current Order ({cart.cart.items.length} items · {fmt(cart.total())})
-            </p>
-            <div className="flex gap-2">
-              <Input value={label} onChange={setLabel} placeholder="Label (optional)" className="flex-1" />
-              <Btn variant="mango" onClick={handleHold} loading={createHeld.isPending}>Hold</Btn>
-            </div>
+          <div>
+            {!showHoldForm ? (
+              <button
+                onClick={() => setShowHoldForm(true)}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border-2 border-dashed border-amber-300 hover:bg-yellow-50 transition-all text-left"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: 'var(--mango-yellow)' }}>
+                    <Plus size={15} className="text-amber-900" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-700 text-gray-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+                      Park current order
+                    </div>
+                    <div className="text-xs text-gray-400">{cart.cart.items.length} items · {fmt(cart.total())}</div>
+                  </div>
+                </div>
+                <ChevronRight size={15} className="text-gray-400" />
+              </button>
+            ) : (
+              <div className="rounded-2xl p-4 border border-amber-200" style={{ backgroundColor: 'var(--mango-yellow-xl)' }}>
+                <p className="text-sm text-amber-900 mb-3 font-700" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+                  Parking {cart.cart.items.length} items · {fmt(cart.total())}
+                </p>
+                <div className="flex gap-2">
+                  <Input value={label} onChange={setLabel} placeholder="Label (optional)" className="flex-1" />
+                  <Btn variant="mango" onClick={handleHold} loading={createHeld.isPending}>Park</Btn>
+                  <Btn variant="ghost" onClick={() => setShowHoldForm(false)}>
+                    <X size={14} />
+                  </Btn>
+                </div>
+              </div>
+            )}
           </div>
         )}
+
         <div>
-          <p className="text-xs text-gray-400 mb-3 font-medium">Held orders expire in 1 hour</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-700 text-gray-500 uppercase tracking-widest" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+              Parked orders
+            </p>
+            <p className="text-xs text-gray-400 font-medium">Expire in 1 hour</p>
+          </div>
           {isLoading ? (
             <div className="flex justify-center py-6"><RefreshCw className="animate-spin text-gray-300" /></div>
           ) : !heldOrders?.length ? (
             <div className="text-center text-gray-400 py-10 text-sm">
               <Receipt size={32} className="mx-auto mb-3 opacity-30" />
-              No held orders
+              No parked orders
             </div>
           ) : (
             <div className="flex flex-col gap-2">
               {heldOrders.map((order: HeldOrder) => (
                 <div key={order.id}
-                  className="flex items-center justify-between bg-white border border-gray-200 rounded-2xl px-4 py-3.5 shadow-sm">
-                  <div>
-                    <div className="text-gray-900 text-sm font-700" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-                      {order.label ?? 'Unnamed Order'}
+                  className="flex items-center justify-between bg-white border border-gray-200 rounded-2xl px-4 py-3.5 shadow-sm hover:border-yellow-300 transition-all">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                      style={{ backgroundColor: 'var(--mango-yellow-lt)' }}>
+                      <Receipt size={16} className="text-amber-700" />
                     </div>
-                    <div className="text-gray-500 text-xs mt-0.5">
-                      {order.data.items.length} items · {fmt(order.data.items.reduce((s, i) => s + i.line_total, 0))}
+                    <div className="min-w-0">
+                      <div className="text-gray-900 text-sm font-700 truncate" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+                        {order.label ?? 'Unnamed Order'}
+                      </div>
+                      <div className="text-gray-500 text-xs mt-0.5">
+                        {order.data.items.length} items · {fmt(order.data.items.reduce((s, i) => s + i.line_total, 0))}
+                      </div>
                     </div>
-                    <div className="text-gray-400 text-xs mt-0.5">Expires {fmtDate(order.expires_at)}</div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-1.5 shrink-0 ml-2">
                     <Btn size="sm" variant="mango" onClick={() => handleRestore(order)}>Restore</Btn>
-                    <Btn size="sm" variant="ghost" onClick={() => deleteHeld.mutate(order.id)}>
+                    <Btn size="sm" variant="ghost" onClick={() => deleteHeld.mutate(order.id)} title="Delete">
                       <Trash2 size={13} />
                     </Btn>
                   </div>
@@ -1746,7 +2159,6 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
 
 // ─── Shift Modal ──────────────────────────────────────────────
 function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => void }) {
-  const openPinModal = useUIStore(s => s.openPinModal);
   const openShift = useOpenShift();
   const closeShift = useCloseShift();
   const cashDrop = useCashDrop();
@@ -1758,45 +2170,55 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
   const [dropReason, setDropReason] = useState('');
   const [tab, setTab] = useState<'overview' | 'close' | 'drop'>('overview');
 
-  const handleOpen = async () => {
-    const ok = await openPinModal();
-    if (!ok) return;
-    await openShift.mutateAsync({ starting_float: parseFloat(startFloat) || 0 });
-    toast('Shift opened');
-    onClose();
+  // Any-user PIN for shift actions
+  const [showAnyPin, setShowAnyPin] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'open' | 'close' | 'drop' | null>(null);
+
+  const triggerAction = (action: 'open' | 'close' | 'drop') => {
+    setPendingAction(action);
+    setShowAnyPin(true);
   };
 
-  const handleClose = async () => {
-    if (!shift) return;
-    const ok = await openPinModal();
-    if (!ok) return;
-    await closeShift.mutateAsync({ id: shift.id, closing_cash: parseFloat(closingCash) || 0, notes: closeNotes });
-    toast('Shift closed');
-    onClose();
-  };
-
-  const handleDrop = async () => {
-    if (!shift || !dropReason) return;
-    const ok = await openPinModal();
-    if (!ok) return;
-    await cashDrop.mutateAsync({ shift_id: shift.id, amount: parseFloat(dropAmount) || 0, reason: dropReason });
-    toast('Cash drop recorded');
-    setDropAmount(''); setDropReason('');
-    onClose();
+  const executeAction = async (actioner: { user_id: string; user_name: string; role: string }) => {
+    setShowAnyPin(false);
+    if (pendingAction === 'open') {
+      await openShift.mutateAsync({ starting_float: parseFloat(startFloat) || 0 });
+      toast('Shift opened');
+      onClose();
+    } else if (pendingAction === 'close' && shift) {
+      await closeShift.mutateAsync({ id: shift.id, closing_cash: parseFloat(closingCash) || 0, notes: closeNotes });
+      toast('Shift closed');
+      onClose();
+    } else if (pendingAction === 'drop' && shift && dropReason) {
+      await cashDrop.mutateAsync({ shift_id: shift.id, amount: parseFloat(dropAmount) || 0, reason: dropReason });
+      toast('Cash drop recorded');
+      setDropAmount(''); setDropReason('');
+      onClose();
+    }
+    setPendingAction(null);
   };
 
   if (!shift) {
     return (
-      <Modal open onClose={onClose} title="🔓 Open Shift">
-        <div className="flex flex-col gap-5">
-          <p className="text-gray-500 text-sm">Enter the starting cash float for this shift.</p>
-          <Input label="Starting Float (₱)" type="number" value={startFloat} min={0} step={0.01} onChange={setStartFloat} />
-          <div className="flex gap-2">
-            <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
-            <Btn variant="mango" size="lg" onClick={handleOpen} loading={openShift.isPending} className="flex-1">Open Shift</Btn>
+      <>
+        <Modal open onClose={onClose} title="🔓 Open Shift">
+          <div className="flex flex-col gap-5">
+            <p className="text-gray-500 text-sm">Enter the starting cash float for this shift.</p>
+            <Input label="Starting Float (₱)" type="number" value={startFloat} min={0} step={0.01} onChange={setStartFloat} />
+            <div className="flex gap-2">
+              <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
+              <Btn variant="mango" size="lg" onClick={() => triggerAction('open')} loading={openShift.isPending} className="flex-1">Open Shift</Btn>
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+        <AnyUserPinModal
+          open={showAnyPin}
+          onClose={() => { setShowAnyPin(false); setPendingAction(null); }}
+          onSuccess={executeAction}
+          title="🔒 Open Shift"
+          description="Enter your PIN to open the shift."
+        />
+      </>
     );
   }
 
@@ -1805,90 +2227,101 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
   const variance = parseFloat(closingCash || '0') - expectedCash;
 
   return (
-    <Modal open onClose={onClose} title="📊 Shift Management" maxWidth="max-w-md">
-      <div className="flex gap-1 mb-5 bg-gray-100 p-1 rounded-xl">
-        {(['overview', 'drop', 'close'] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={clsx('flex-1 py-2 rounded-xl text-xs font-700 capitalize transition-all',
-              tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+    <>
+      <Modal open onClose={onClose} title="📊 Shift Management" maxWidth="max-w-md">
+        <div className="flex gap-1 mb-5 bg-gray-100 p-1 rounded-xl" role="tablist">
+          {(['overview', 'drop', 'close'] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              role="tab" aria-selected={tab === t}
+              className={clsx('flex-1 py-2 rounded-xl text-xs font-700 capitalize transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              )}
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+              {t === 'drop' ? 'Cash Drop' : t === 'close' ? 'Close Shift' : 'Overview'}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'overview' && (
+          <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-2 gap-2.5">
+              <StatCard label="Starting Float" value={fmt(shift.starting_float)} />
+              <StatCard label="Cash Sales" value={fmt(cashTotal)} />
+              {(Object.entries(shift.payment_totals ?? {}) as [string, number][])
+                .filter(([k]) => k !== 'cash')
+                .map(([k, v]) => <StatCard key={k} label={k.toUpperCase()} value={fmt(v)} />)}
+              <StatCard label="Expected Cash" value={fmt(expectedCash)} accent />
+            </div>
+            {(shift.cash_drops ?? []).length > 0 && (
+              <div>
+                <p className="text-xs font-700 text-gray-500 mb-2 uppercase tracking-wider" style={{ fontWeight: 700 }}>Cash Drops</p>
+                {shift.cash_drops.map((d: CashDrop) => (
+                  <div key={d.id} className="flex justify-between text-xs text-gray-600 py-2 border-b border-gray-100">
+                    <span className="font-medium">{d.reason}</span>
+                    <span className="text-red-500 font-700" style={{ fontWeight: 700 }}>−{fmt(d.amount)}</span>
+                  </div>
+                ))}
+              </div>
             )}
-            style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-            {t === 'drop' ? 'Cash Drop' : t === 'close' ? 'Close Shift' : 'Overview'}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'overview' && (
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-2.5">
-            <StatCard label="Starting Float" value={fmt(shift.starting_float)} />
-            <StatCard label="Cash Sales" value={fmt(cashTotal)} />
-            {(Object.entries(shift.payment_totals ?? {}) as [string, number][])
-              .filter(([k]) => k !== 'cash')
-              .map(([k, v]) => <StatCard key={k} label={k.toUpperCase()} value={fmt(v)} />)}
-            <StatCard label="Expected Cash" value={fmt(expectedCash)} accent />
+            <p className="text-xs text-gray-400 font-medium">Opened {fmtDate(shift.started_at)}</p>
           </div>
-          {(shift.cash_drops ?? []).length > 0 && (
-            <div>
-              <p className="text-xs font-700 text-gray-500 mb-2 uppercase tracking-wider" style={{ fontWeight: 700 }}>Cash Drops</p>
-              {shift.cash_drops.map((d: CashDrop) => (
-                <div key={d.id} className="flex justify-between text-xs text-gray-600 py-2 border-b border-gray-100">
-                  <span className="font-medium">{d.reason}</span>
-                  <span className="text-red-500 font-700" style={{ fontWeight: 700 }}>−{fmt(d.amount)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          <p className="text-xs text-gray-400 font-medium">Opened {fmtDate(shift.started_at)}</p>
-        </div>
-      )}
+        )}
 
-      {tab === 'drop' && (
-        <div className="flex flex-col gap-4">
-          <p className="text-sm text-gray-500">Record cash removed from the drawer.</p>
-          <Input label="Amount (₱)" type="number" value={dropAmount} min={0} step={0.01} onChange={setDropAmount} />
-          <Input label="Reason" value={dropReason} onChange={setDropReason} placeholder="e.g. Safe drop, Manager pull" />
-          <div className="flex gap-2">
-            <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
-            <Btn variant="warrior" onClick={handleDrop} loading={cashDrop.isPending}
-              disabled={!dropReason || !dropAmount} className="flex-1">Record Drop</Btn>
-          </div>
-        </div>
-      )}
-
-      {tab === 'close' && (
-        <div className="flex flex-col gap-4">
-          <p className="text-sm text-gray-500">Count your cash drawer before closing the shift.</p>
-          <div className="rounded-xl p-3.5 border" style={{ backgroundColor: 'var(--mango-yellow-xl)', borderColor: '#FDE68A' }}>
-            <div className="flex justify-between text-sm text-amber-800 font-semibold">
-              <span>Expected Cash</span>
-              <span className="font-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>{fmt(expectedCash)}</span>
+        {tab === 'drop' && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-gray-500">Record cash removed from the drawer.</p>
+            <Input label="Amount (₱)" type="number" value={dropAmount} min={0} step={0.01} onChange={setDropAmount} />
+            <Input label="Reason" value={dropReason} onChange={setDropReason} placeholder="e.g. Safe drop, Manager pull" />
+            <div className="flex gap-2">
+              <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
+              <Btn variant="warrior" onClick={() => triggerAction('drop')} loading={cashDrop.isPending}
+                disabled={!dropReason || !dropAmount} className="flex-1">Record Drop</Btn>
             </div>
           </div>
-          <Input label="Actual Closing Cash (₱)" type="number" value={closingCash} min={0} step={0.01} onChange={setClosingCash} autoFocus />
-          {closingCash && (
-            <div className={clsx('flex justify-between text-sm font-700 px-4 py-3 rounded-xl border')}
-              style={{
-                fontFamily: 'var(--font-display)', fontWeight: 700,
-                ...(Math.abs(variance) < 1
-                  ? { backgroundColor: 'var(--leaf-green-lt)', color: 'var(--leaf-green)', borderColor: '#A7F3D0' }
-                  : variance > 0
-                    ? { backgroundColor: '#EFF6FF', color: '#1D4ED8', borderColor: '#BFDBFE' }
-                    : { backgroundColor: '#FFF1F2', color: 'var(--warrior-red)', borderColor: '#FECDD3' })
-              }}>
-              <span>Variance</span>
-              <span>{variance > 0 ? '+' : ''}{fmt(variance)}</span>
+        )}
+
+        {tab === 'close' && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-gray-500">Count your cash drawer before closing the shift.</p>
+            <div className="rounded-xl p-3.5 border" style={{ backgroundColor: 'var(--mango-yellow-xl)', borderColor: '#FDE68A' }}>
+              <div className="flex justify-between text-sm text-amber-800 font-semibold">
+                <span>Expected Cash</span>
+                <span className="font-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>{fmt(expectedCash)}</span>
+              </div>
             </div>
-          )}
-          <Input label="Notes (optional)" value={closeNotes} onChange={setCloseNotes} />
-          <div className="flex gap-2">
-            <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
-            <Btn variant="danger" size="lg" onClick={handleClose} loading={closeShift.isPending}
-              disabled={!closingCash} className="flex-1">Close Shift</Btn>
+            <Input label="Actual Closing Cash (₱)" type="number" value={closingCash} min={0} step={0.01} onChange={setClosingCash} autoFocus />
+            {closingCash && (
+              <div className={clsx('flex justify-between text-sm font-700 px-4 py-3 rounded-xl border')}
+                style={{
+                  fontFamily: 'var(--font-display)', fontWeight: 700,
+                  ...(Math.abs(variance) < 1
+                    ? { backgroundColor: 'var(--leaf-green-lt)', color: 'var(--leaf-green)', borderColor: '#A7F3D0' }
+                    : variance > 0
+                      ? { backgroundColor: '#EFF6FF', color: '#1D4ED8', borderColor: '#BFDBFE' }
+                      : { backgroundColor: '#FFF1F2', color: 'var(--warrior-red)', borderColor: '#FECDD3' })
+                }}>
+                <span>Variance</span>
+                <span>{variance > 0 ? '+' : ''}{fmt(variance)}</span>
+              </div>
+            )}
+            <Input label="Notes (optional)" value={closeNotes} onChange={setCloseNotes} />
+            <div className="flex gap-2">
+              <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
+              <Btn variant="danger" size="lg" onClick={() => triggerAction('close')} loading={closeShift.isPending}
+                disabled={!closingCash} className="flex-1">Close Shift</Btn>
+            </div>
           </div>
-        </div>
-      )}
-    </Modal>
+        )}
+      </Modal>
+
+      <AnyUserPinModal
+        open={showAnyPin}
+        onClose={() => { setShowAnyPin(false); setPendingAction(null); }}
+        onSuccess={executeAction}
+        title={pendingAction === 'close' ? '🔒 Close Shift' : pendingAction === 'drop' ? '🔒 Cash Drop' : '🔒 Shift Action'}
+        description="Enter your PIN to authorize this action."
+      />
+    </>
   );
 }
 
@@ -1910,13 +2343,13 @@ function PartialActionModal({
 }: {
   sale: SaleDetail; action: 'void' | 'refund'; onClose: () => void; onDone: () => void;
 }) {
-  const openPinModal = useUIStore(s => s.openPinModal);
   const voidSale = useVoidSale();
   const refundSale = useRefundSale();
   const [mode, setMode] = useState<'entire' | 'items'>('entire');
   const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set());
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showAnyPin, setShowAnyPin] = useState(false);
 
   const toggleItem = (idx: number) => {
     setSelectedItems(prev => {
@@ -1932,14 +2365,14 @@ function PartialActionModal({
 
   const canConfirm = reason.trim() && (mode === 'entire' || selectedItems.size > 0);
 
-  const handleConfirm = async () => {
-    if (!canConfirm) return;
-    const ok = await openPinModal();
-    if (!ok) return;
+  const handleConfirm = async (actioner: { user_id: string; user_name: string; role: string }) => {
+    setShowAnyPin(false);
     setLoading(true);
     try {
       const payload = {
         id: sale.id, reason,
+        actioned_by_user_id: actioner.user_id,
+        actioned_by_name: actioner.user_name,
         ...(mode === 'items' ? { item_indices: Array.from(selectedItems) } : {}),
       };
       if (action === 'void') await voidSale.mutateAsync(payload);
@@ -1956,93 +2389,249 @@ function PartialActionModal({
   const actionLabel = action === 'void' ? 'Void' : 'Refund';
 
   return (
-    <Modal open onClose={onClose} title={`${actionLabel} Sale — ${sale.receipt_number}`} maxWidth="max-w-lg">
-      <div className="flex flex-col gap-5">
-        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
-          <button onClick={() => setMode('entire')}
-            className={clsx('flex-1 py-2 rounded-xl text-sm font-700 transition-all',
-              mode === 'entire' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-            )}
-            style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-            {actionLabel} Entire Sale
-          </button>
-          <button onClick={() => setMode('items')}
-            className={clsx('flex-1 py-2 rounded-xl text-sm font-700 transition-all',
-              mode === 'items' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-            )}
-            style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-            {actionLabel} Selected Items
-          </button>
-        </div>
+    <>
+      <Modal open onClose={onClose} title={`${actionLabel} Sale — ${sale.receipt_number}`} maxWidth="max-w-lg">
+        <div className="flex flex-col gap-5">
+          <div className="flex gap-1 bg-gray-100 p-1 rounded-xl" role="tablist">
+            <button onClick={() => setMode('entire')}
+              role="tab" aria-selected={mode === 'entire'}
+              className={clsx('flex-1 py-2 rounded-xl text-sm font-700 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                mode === 'entire' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              )}
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+              {actionLabel} Entire Sale
+            </button>
+            <button onClick={() => setMode('items')}
+              role="tab" aria-selected={mode === 'items'}
+              className={clsx('flex-1 py-2 rounded-xl text-sm font-700 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                mode === 'items' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              )}
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+              {actionLabel} Selected Items
+            </button>
+          </div>
 
-        {mode === 'items' && (
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-xs font-800 text-gray-500 uppercase tracking-widest"
-                style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Select Items</span>
-              <div className="flex gap-2">
-                <button onClick={() => setSelectedItems(new Set(sale.items.map((_, i) => i)))}
-                  className="text-xs text-sky-500 hover:text-sky-700 font-700" style={{ fontWeight: 700 }}>All</button>
-                <button onClick={() => setSelectedItems(new Set())}
-                  className="text-xs text-gray-400 hover:text-gray-600 font-700" style={{ fontWeight: 700 }}>None</button>
+          {mode === 'items' && (
+            <div>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs font-800 text-gray-500 uppercase tracking-widest"
+                  style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Select Items</span>
+                <div className="flex gap-2">
+                  <button onClick={() => setSelectedItems(new Set(sale.items.map((_, i) => i)))}
+                    className="text-xs text-sky-500 hover:text-sky-700 font-700 rounded px-1" style={{ fontWeight: 700 }}>All</button>
+                  <button onClick={() => setSelectedItems(new Set())}
+                    className="text-xs text-gray-400 hover:text-gray-600 font-700 rounded px-1" style={{ fontWeight: 700 }}>None</button>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto scrollable border border-gray-200 rounded-2xl p-2">
+                {sale.items.map((item, idx) => {
+                  const isSelected = selectedItems.has(idx);
+                  return (
+                    <button key={idx} onClick={() => toggleItem(idx)}
+                      aria-pressed={isSelected}
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                      style={isSelected
+                        ? { borderColor: '#FCA5A5', backgroundColor: '#FFF1F2' }
+                        : { borderColor: '#E4E4E7', backgroundColor: '#fff' }}>
+                      <div className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all"
+                        style={isSelected ? { borderColor: '#EF4444', backgroundColor: '#EF4444' } : { borderColor: '#D1D1D6' }}>
+                        {isSelected && <span className="text-white text-xs leading-none font-black">✓</span>}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-600 text-gray-900" style={{ fontWeight: 600 }}>
+                          {item.qty}x {item.item_name}{item.size_name ? ` (${item.size_name})` : ''}
+                        </div>
+                      </div>
+                      <span className="text-sm font-700 text-gray-700" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+                        {fmt(item.final_price)}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
-            <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto border border-gray-200 rounded-2xl p-2">
-              {sale.items.map((item, idx) => {
-                const isSelected = selectedItems.has(idx);
-                return (
-                  <button key={idx} onClick={() => toggleItem(idx)}
-                    className="flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 transition-all text-left"
-                    style={isSelected
-                      ? { borderColor: '#FCA5A5', backgroundColor: '#FFF1F2' }
-                      : { borderColor: '#E4E4E7', backgroundColor: '#fff' }}>
-                    <div className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all"
-                      style={isSelected ? { borderColor: '#EF4444', backgroundColor: '#EF4444' } : { borderColor: '#D1D1D6' }}>
-                      {isSelected && <span className="text-white text-xs leading-none font-black">✓</span>}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-600 text-gray-900" style={{ fontWeight: 600 }}>
-                        {item.qty}x {item.item_name}{item.size_name ? ` (${item.size_name})` : ''}
-                      </div>
-                    </div>
-                    <span className="text-sm font-700 text-gray-700" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-                      {fmt(item.final_price)}
-                    </span>
-                  </button>
-                );
-              })}
+          )}
+
+          <div className="flex justify-between items-center px-4 py-3 rounded-2xl border"
+            style={{
+              backgroundColor: action === 'void' ? '#FFF1F2' : '#F5F3FF',
+              borderColor: action === 'void' ? '#FECDD3' : '#DDD6FE',
+            }}>
+            <span className="text-sm font-700" style={{ color: action === 'void' ? 'var(--warrior-red)' : '#7C3AED', fontWeight: 700 }}>
+              Amount to {actionLabel}
+            </span>
+            <span className="font-900 text-xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 900, color: action === 'void' ? 'var(--warrior-red)' : '#7C3AED' }}>
+              {fmt(selectedTotal)}
+            </span>
+          </div>
+
+          <Input label="Reason *" value={reason} onChange={setReason} placeholder={`Reason for ${action}…`} autoFocus />
+          <div className="flex gap-2">
+            <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
+            <Btn variant="danger" size="lg" onClick={() => setShowAnyPin(true)} loading={loading} disabled={!canConfirm} className="flex-1">
+              Confirm {actionLabel}
+            </Btn>
+          </div>
+        </div>
+      </Modal>
+
+      <AnyUserPinModal
+        open={showAnyPin}
+        onClose={() => setShowAnyPin(false)}
+        onSuccess={handleConfirm}
+        title={`🔒 Authorize ${actionLabel}`}
+        description={`Enter your PIN to ${action} this sale. This will be logged with your name.`}
+      />
+    </>
+  );
+}
+
+// ─── Edit Sale Modal ──────────────────────────────────────────
+function EditSaleModal({ sale, onClose, onDone }: { sale: SaleDetail; onClose: () => void; onDone: () => void }) {
+  const editSale = useEditSale();
+  const [note, setNote] = useState(sale.note ?? '');
+  const [payments, setPayments] = useState<PaymentLine[]>(sale.payments.map(p => ({ ...p })));
+  const [tendered, setTendered] = useState(sale.tendered_amount != null ? String(sale.tendered_amount) : '');
+  const [loading, setLoading] = useState(false);
+  const [showAnyPin, setShowAnyPin] = useState(false);
+
+  const paymentTotal = payments.reduce((s, p) => s + (p.amount || 0), 0);
+  const balanced = Math.abs(paymentTotal - sale.total) < 0.01;
+
+  const updatePayment = (idx: number, field: 'method' | 'amount', val: string) => {
+    setPayments(prev => prev.map((p, i) => i === idx ? { ...p, [field]: field === 'amount' ? parseFloat(val) || 0 : val } : p));
+  };
+
+  const addPaymentLine = () => {
+    const used = payments.map(p => p.method);
+    const next = (['cash', 'gcash', 'maya'] as PaymentMethod[]).find(m => !used.includes(m));
+    if (!next) return;
+    setPayments(prev => [...prev, { method: next, amount: 0 }]);
+  };
+
+  const handleSave = async (actioner: { user_id: string; user_name: string; role: string }) => {
+    setShowAnyPin(false);
+    setLoading(true);
+    try {
+      await editSale.mutateAsync({
+        id: sale.id,
+        note: note || undefined,
+        payments,
+        tendered_amount: tendered ? parseFloat(tendered) : undefined,
+      });
+      toast('Sale updated');
+      onDone();
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Update failed', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const hasCash = payments.some(p => p.method === 'cash');
+
+  return (
+    <>
+      <Modal open onClose={onClose} title={`✏️ Edit Sale — ${sale.receipt_number}`} maxWidth="max-w-md">
+        <div className="flex flex-col gap-5">
+          {/* Items summary (read-only) */}
+          <div className="rounded-2xl border border-gray-200 p-3.5 bg-gray-50">
+            <p className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Items (read-only)</p>
+            <div className="space-y-1.5">
+              {sale.items.map((item, i) => (
+                <div key={i} className="flex justify-between text-sm text-gray-700">
+                  <span>{item.qty}x {item.item_name}{item.size_name ? ` (${item.size_name})` : ''}</span>
+                  <span className="font-600" style={{ fontWeight: 600 }}>{fmt(item.final_price)}</span>
+                </div>
+              ))}
+              <div className="flex justify-between font-800 text-amber-900 pt-2 border-t border-gray-200"
+                style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+                <span>Total</span><span>{fmt(sale.total)}</span>
+              </div>
             </div>
           </div>
-        )}
 
-        <div className="flex justify-between items-center px-4 py-3 rounded-2xl border"
-          style={{
-            backgroundColor: action === 'void' ? '#FFF1F2' : '#F5F3FF',
-            borderColor: action === 'void' ? '#FECDD3' : '#DDD6FE',
-          }}>
-          <span className="text-sm font-700" style={{ color: action === 'void' ? 'var(--warrior-red)' : '#7C3AED', fontWeight: 700 }}>
-            Amount to {actionLabel}
-          </span>
-          <span className="font-900 text-xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 900, color: action === 'void' ? 'var(--warrior-red)' : '#7C3AED' }}>
-            {fmt(selectedTotal)}
-          </span>
-        </div>
+          {/* Editable note */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-700 text-gray-500 uppercase tracking-widest"
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 700, letterSpacing: '0.08em' }}>
+              Note
+            </label>
+            <textarea value={note} onChange={e => setNote(e.target.value)} rows={2}
+              placeholder="Order note…"
+              className="bg-white border border-gray-200 text-gray-900 rounded-xl px-3.5 py-2.5 text-sm w-full
+                focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20
+                resize-none font-medium transition-colors" />
+          </div>
 
-        <Input label="Reason *" value={reason} onChange={setReason} placeholder={`Reason for ${action}…`} autoFocus />
-        <div className="flex gap-2">
-          <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
-          <Btn variant="danger" size="lg" onClick={handleConfirm} loading={loading} disabled={!canConfirm} className="flex-1">
-            Confirm {actionLabel}
-          </Btn>
+          {/* Editable payments */}
+          <div>
+            <div className="flex items-center justify-between mb-2.5">
+              <p className="text-xs font-800 text-gray-500 uppercase tracking-widest"
+                style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Payment Method</p>
+              {payments.length < 3 && (
+                <Btn size="sm" variant="ghost" onClick={addPaymentLine}>
+                  <Plus size={12} /> Add
+                </Btn>
+              )}
+            </div>
+            <div className="flex flex-col gap-2.5">
+              {payments.map((p, i) => (
+                <div key={i} className="flex gap-2 items-start">
+                  <Select value={p.method} onChange={v => updatePayment(i, 'method', v)}
+                    options={[
+                      { value: 'cash', label: '💵 Cash' },
+                      { value: 'gcash', label: '📱 GCash' },
+                      { value: 'maya', label: '💳 Maya' },
+                    ]} className="w-36" />
+                  <Input type="number" value={p.amount} min={0} step={0.01}
+                    onChange={v => updatePayment(i, 'amount', v)} className="flex-1" />
+                  {payments.length > 1 && (
+                    <button onClick={() => setPayments(prev => prev.filter((_, j) => j !== i))}
+                      className="text-gray-300 hover:text-red-500 p-2 transition-colors mt-0.5 rounded-lg hover:bg-red-50">
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {!balanced && (
+              <div className="flex items-center gap-2 text-red-600 text-xs mt-2 px-3 py-2 rounded-xl bg-red-50 border border-red-100 font-medium" role="alert">
+                <AlertTriangle size={12} /> Payment total ({fmt(paymentTotal)}) doesn't match sale total ({fmt(sale.total)})
+              </div>
+            )}
+          </div>
+
+          {/* Tendered amount (if cash) */}
+          {hasCash && (
+            <Input label="Cash Tendered (₱)" type="number" value={tendered} min={0} step={0.01}
+              onChange={setTendered} placeholder="Amount given by customer" />
+          )}
+
+          <div className="flex gap-2">
+            <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
+            <Btn variant="mango" size="lg" onClick={() => setShowAnyPin(true)}
+              disabled={!balanced} loading={loading} className="flex-[2]">
+              <Save size={14} /> Save Changes
+            </Btn>
+          </div>
         </div>
-      </div>
-    </Modal>
+      </Modal>
+
+      <AnyUserPinModal
+        open={showAnyPin}
+        onClose={() => setShowAnyPin(false)}
+        onSuccess={handleSave}
+        title="🔒 Authorize Edit"
+        description="Enter your PIN to save changes to this sale."
+      />
+    </>
   );
 }
 
 // ─── Sales Page ───────────────────────────────────────────────
 function SalesPage() {
-  const { user } = useAuthStore();
   const openPinModal = useUIStore(s => s.openPinModal);
   const [dateFrom, setDateFrom] = useState(new Date().toISOString().slice(0, 10));
   const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
@@ -2050,8 +2639,11 @@ function SalesPage() {
   const [receiptQ, setReceiptQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [actionModal, setActionModal] = useState<{ type: 'void' | 'refund' } | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleteReason, setDeleteReason] = useState('');
+  const [showAnyPinForReprint, setShowAnyPinForReprint] = useState(false);
+  const [showAnyPinForDelete, setShowAnyPinForDelete] = useState(false);
 
   const { data: sales, isLoading, refetch } = useSales({
     date_from: dateFrom, date_to: dateTo,
@@ -2062,22 +2654,29 @@ function SalesPage() {
   const softDelete = useSoftDeleteSale();
   const reprint = useReprintSale();
 
-  const handleReprint = async (id: string) => {
-    const ok = await openPinModal();
-    if (!ok) return;
-    await reprint.mutateAsync(id);
+  const handleReprint = () => setShowAnyPinForReprint(true);
+
+  const doReprint = async (actioner: { user_id: string; user_name: string; role: string }) => {
+    if (!saleDetail) return;
+    setShowAnyPinForReprint(false);
+    await reprint.mutateAsync({ id: saleDetail.id, actioned_by_user_id: actioner.user_id, actioned_by_name: actioner.user_name });
     toast('Reprint recorded');
     window.print();
   };
 
-  const handleDelete = async () => {
+  const handleDeleteConfirm = () => {
+    if (!deleteReason) return;
+    setDeleteModal(false);
+    setShowAnyPinForDelete(true);
+  };
+
+  const doDelete = async (actioner: { user_id: string; user_name: string; role: string }) => {
     if (!saleDetail || !deleteReason) return;
-    const ok = await openPinModal();
-    if (!ok) return;
+    setShowAnyPinForDelete(false);
     try {
       await softDelete.mutateAsync({ id: saleDetail.id, reason: deleteReason });
       toast('Sale deleted');
-      setDeleteModal(false); setDeleteReason(''); setSelectedId(null); refetch();
+      setDeleteReason(''); setSelectedId(null); refetch();
     } catch (e: unknown) {
       toast(e instanceof Error ? e.message : 'Delete failed', 'error');
     }
@@ -2114,7 +2713,7 @@ function SalesPage() {
               </span>
             </div>
           )}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto scrollable">
             {isLoading ? (
               <div className="p-4 space-y-2">
                 {Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-16 shimmer rounded-2xl" />)}
@@ -2129,8 +2728,10 @@ function SalesPage() {
                 {sales.map((sale: SaleListItem) => (
                   <button key={sale.id}
                     onClick={() => setSelectedId(s => s === sale.id ? null : sale.id)}
+                    aria-pressed={selectedId === sale.id}
                     className={clsx(
                       'w-full flex items-center gap-3 px-4 py-3.5 text-left transition-all hover:bg-gray-50',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 focus-visible:ring-inset',
                       selectedId === sale.id && 'border-l-[3px]'
                     )}
                     style={selectedId === sale.id ? { borderLeftColor: 'var(--mango-yellow)', backgroundColor: 'var(--mango-yellow-xl)' } : {}}>
@@ -2165,12 +2766,12 @@ function SalesPage() {
                 <div className="text-xs text-gray-400 font-medium mt-0.5">{saleDetail.cashier_name}</div>
               </div>
               {saleDetail.status === 'completed' && (
-                <Btn size="sm" variant="secondary" onClick={() => handleReprint(saleDetail.id)}>
+                <Btn size="sm" variant="secondary" onClick={handleReprint}>
                   <Printer size={12} /> Reprint
                 </Btn>
               )}
             </div>
-            <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex-1 overflow-y-auto p-4 scrollable">
               <div className="space-y-2 mb-4">
                 {saleDetail.items.map((item: SaleItemDetail, i: number) => (
                   <div key={i} className="text-sm">
@@ -2223,10 +2824,13 @@ function SalesPage() {
               )}
             </div>
             {saleDetail.status === 'completed' && (
-              <div className="border-t border-gray-100 p-3 flex gap-2 shrink-0">
+              <div className="border-t border-gray-100 p-3 flex gap-2 shrink-0 flex-wrap">
+                <Btn size="sm" variant="mango" className="flex-1" onClick={() => setShowEditModal(true)}>
+                  <Edit2 size={12} /> Edit
+                </Btn>
                 <Btn size="sm" variant="secondary" className="flex-1" onClick={() => setActionModal({ type: 'void' })}>Void</Btn>
                 <Btn size="sm" variant="secondary" className="flex-1" onClick={() => setActionModal({ type: 'refund' })}>Refund</Btn>
-                <Btn size="sm" variant="danger" onClick={() => { setDeleteModal(true); setDeleteReason(''); }}>
+                <Btn size="sm" variant="danger" onClick={() => { setDeleteModal(true); setDeleteReason(''); }} title="Delete sale">
                   <Trash2 size={13} />
                 </Btn>
               </div>
@@ -2240,17 +2844,42 @@ function SalesPage() {
           onClose={() => setActionModal(null)}
           onDone={() => { setActionModal(null); setSelectedId(null); refetch(); }} />
       )}
+
+      {showEditModal && saleDetail && (
+        <EditSaleModal
+          sale={saleDetail}
+          onClose={() => setShowEditModal(false)}
+          onDone={() => { setShowEditModal(false); refetch(); }}
+        />
+      )}
+
+      {/* Delete modal — reason first, then PIN */}
       <Modal open={deleteModal} onClose={() => setDeleteModal(false)} title="Delete Sale">
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-gray-500">PIN required. Please provide a reason for deletion.</p>
+          <p className="text-sm text-gray-500">Please provide a reason for deletion.</p>
           <Input label="Reason" value={deleteReason} onChange={setDeleteReason} autoFocus />
           <div className="flex gap-2">
             <Btn variant="secondary" onClick={() => setDeleteModal(false)} className="flex-1">Cancel</Btn>
-            <Btn variant="danger" onClick={handleDelete} disabled={!deleteReason}
-              loading={softDelete.isPending} className="flex-1">Confirm Delete</Btn>
+            <Btn variant="danger" onClick={handleDeleteConfirm} disabled={!deleteReason} className="flex-1">Continue</Btn>
           </div>
         </div>
       </Modal>
+
+      <AnyUserPinModal
+        open={showAnyPinForReprint}
+        onClose={() => setShowAnyPinForReprint(false)}
+        onSuccess={doReprint}
+        title="🔒 Authorize Reprint"
+        description="Enter your PIN to authorize this reprint."
+      />
+
+      <AnyUserPinModal
+        open={showAnyPinForDelete}
+        onClose={() => setShowAnyPinForDelete(false)}
+        onSuccess={doDelete}
+        title="🔒 Authorize Delete"
+        description="Enter your PIN to permanently delete this sale."
+      />
     </div>
   );
 }
@@ -2270,7 +2899,7 @@ function AdminDashboardPage() {
         <Input label="From" type="date" value={dateFrom} onChange={setDateFrom} className="w-36" />
         <Input label="To" type="date" value={dateTo} onChange={setDateTo} className="w-36" />
       </div>
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4 scrollable">
         {isLoading ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-4xl mx-auto">
             {Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-28 shimmer rounded-2xl" />)}
@@ -2303,7 +2932,7 @@ function AdminDashboardPage() {
                           <span className="text-gray-400 font-medium text-xs ml-2">({pct.toFixed(0)}%)</span>
                         </span>
                       </div>
-                      <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-3 bg-gray-100 rounded-full overflow-hidden" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
                         <div className="h-full rounded-full transition-all duration-700"
                           style={{ width: `${pct}%`, backgroundColor: barColor }} />
                       </div>
@@ -2338,7 +2967,7 @@ function AdminDashboardPage() {
               ]).map(l => (
                 <button key={l.page} onClick={() => navigate(l.page)}
                   className="flex flex-col items-start gap-3 px-4 py-4 bg-white border border-gray-150 rounded-2xl
-                    hover:shadow-md transition-all text-left group active:scale-98"
+                    hover:shadow-md transition-all text-left group active:scale-98 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                   style={{ boxShadow: 'var(--shadow-sm)' }}>
                   <div className="w-10 h-10 rounded-xl flex items-center justify-center transition-all"
                     style={{ backgroundColor: l.color + '18', color: l.color }}>
@@ -2449,10 +3078,11 @@ function AdminMenuPage() {
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
       <div className="px-4 py-3 bg-white border-b border-gray-150 shrink-0 flex items-center gap-3"
         style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.04)' }}>
-        <div className="flex bg-gray-100 p-1 rounded-xl gap-1">
+        <div className="flex bg-gray-100 p-1 rounded-xl gap-1" role="tablist">
           {(['items', 'addons'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
-              className={clsx('px-4 py-1.5 rounded-xl text-xs font-700 capitalize transition-all',
+              role="tab" aria-selected={tab === t}
+              className={clsx('px-4 py-1.5 rounded-xl text-xs font-700 capitalize transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                 tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
               )}
               style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
@@ -2464,7 +3094,7 @@ function AdminMenuPage() {
           <Plus size={14} /> Add {tab === 'items' ? 'Item' : 'Add-on'}
         </Btn>
       </div>
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4 scrollable">
         {isLoading ? (
           <div className="flex justify-center py-12"><RefreshCw className="animate-spin text-gray-300" /></div>
         ) : tab === 'items' ? (
@@ -2494,8 +3124,7 @@ function AdminMenuPage() {
                       <div key={item.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className={clsx('text-sm font-600', item.is_active ? 'text-gray-900' : 'text-gray-400 line-through')}
-                              style={{ fontWeight: 600 }}>
+                            <span className={clsx('text-sm font-600', item.is_active ? 'text-gray-900' : 'text-gray-400 line-through')} style={{ fontWeight: 600 }}>
                               {item.name}
                             </span>
                             {!item.is_available && <Badge color="red">86'd</Badge>}
@@ -2508,7 +3137,8 @@ function AdminMenuPage() {
                         <div className="flex gap-1.5 shrink-0">
                           <button
                             onClick={() => toggleAvailability.mutate({ id: item.id, is_available: !item.is_available })}
-                            className={clsx('px-2.5 py-1 rounded-xl text-xs font-700 transition-all border',
+                            aria-pressed={item.is_available}
+                            className={clsx('px-2.5 py-1 rounded-xl text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                               item.is_available
                                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                                 : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
@@ -2517,12 +3147,12 @@ function AdminMenuPage() {
                             {item.is_available ? '✓ Available' : "86'd"}
                           </button>
                           <button onClick={() => openEditItem(item)}
-                            className="p-2 rounded-xl text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all">
+                            className="p-2 rounded-xl text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
                             <Edit2 size={13} />
                           </button>
                           <button
                             onClick={async () => { if (confirm(`Delete "${item.name}"?`)) await deleteItem.mutateAsync(item.id); }}
-                            className="p-2 rounded-xl text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all">
+                            className="p-2 rounded-xl text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
                             <Trash2 size={13} />
                           </button>
                         </div>
@@ -2550,7 +3180,8 @@ function AdminMenuPage() {
                   </div>
                   <button
                     onClick={() => updateAddon.mutate({ id: addon.id, is_available: !addon.is_available })}
-                    className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-all border',
+                    aria-pressed={addon.is_available}
+                    className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                       addon.is_available
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                         : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
@@ -2568,7 +3199,7 @@ function AdminMenuPage() {
 
       <Modal open={showAddItem} onClose={() => setShowAddItem(false)} title="Add Menu Item" maxWidth="max-w-md">
         <div className="flex flex-col gap-4">
-          <Input label="Item Name" value={newItem.name} onChange={v => setNewItem(p => ({ ...p, name: v }))} />
+          <Input label="Item Name" value={newItem.name} onChange={v => setNewItem(p => ({ ...p, name: v }))} autoFocus />
           <Select label="Category" value={newItem.category_id}
             onChange={v => setNewItem(p => ({ ...p, category_id: v }))}
             options={[{ value: '', label: '— No category —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
@@ -2647,7 +3278,7 @@ function AdminMenuPage() {
 
       <Modal open={showAddAddon} onClose={() => setShowAddAddon(false)} title="Add Add-on">
         <div className="flex flex-col gap-4">
-          <Input label="Add-on Name" value={newAddon.name} onChange={v => setNewAddon(p => ({ ...p, name: v }))} />
+          <Input label="Add-on Name" value={newAddon.name} onChange={v => setNewAddon(p => ({ ...p, name: v }))} autoFocus />
           <Input label="Price (₱)" type="number" value={newAddon.price} onChange={v => setNewAddon(p => ({ ...p, price: v }))} min={0} step={0.01} />
           <div className="flex gap-2">
             <Btn variant="secondary" onClick={() => setShowAddAddon(false)} className="flex-1">Cancel</Btn>
@@ -2663,6 +3294,7 @@ function AdminMenuPage() {
 // ─── Admin Staff Page ─────────────────────────────────────────
 function AdminEmployeesPage() {
   const { data: users, isLoading } = useUsers();
+  const { data: usersList } = useUsersList();
   const createUser = useCreateUser();
   const updateUser = useUpdateUser();
   const resetPin = useResetPin();
@@ -2672,31 +3304,45 @@ function AdminEmployeesPage() {
   const [showAddUser, setShowAddUser] = useState(false);
   const [newUser, setNewUser] = useState({ name: '', role: 'crew' as 'crew' | 'admin', pin: '' });
   const [pinReset, setPinReset] = useState<{ userId: string; newPin: string } | null>(null);
+  const [pinConflictError, setPinConflictError] = useState('');
+  const [resetPinConflictError, setResetPinConflictError] = useState('');
 
   const handleAddUser = async () => {
     if (!newUser.name || newUser.pin.length !== 6) return;
     const ok = await openPinModal({ required_role: 'admin' });
-    if (!ok) return;
+    if (!ok.verified) return;
     try {
       await createUser.mutateAsync(newUser);
       setNewUser({ name: '', role: 'crew', pin: '' });
       setShowAddUser(false);
+      setPinConflictError('');
       toast('User created');
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : 'Error creating user', 'error');
+      const msg = e instanceof Error ? e.message : 'Error creating user';
+      if (msg.toLowerCase().includes('pin') || msg.toLowerCase().includes('duplicate')) {
+        setPinConflictError('This PIN is already in use. Please choose a different PIN.');
+      } else {
+        toast(msg, 'error');
+      }
     }
   };
 
   const handleResetPin = async () => {
     if (!pinReset || pinReset.newPin.length !== 6) return;
     const ok = await openPinModal({ required_role: 'admin' });
-    if (!ok) return;
+    if (!ok.verified) return;
     try {
       await resetPin.mutateAsync({ id: pinReset.userId, new_pin: pinReset.newPin });
       setPinReset(null);
+      setResetPinConflictError('');
       toast('PIN reset successfully');
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : 'Error resetting PIN', 'error');
+      const msg = e instanceof Error ? e.message : 'Error resetting PIN';
+      if (msg.toLowerCase().includes('pin') || msg.toLowerCase().includes('duplicate')) {
+        setResetPinConflictError('This PIN is already in use. Please choose a different PIN.');
+      } else {
+        toast(msg, 'error');
+      }
     }
   };
 
@@ -2707,7 +3353,7 @@ function AdminEmployeesPage() {
         <h2 className="text-sm font-800 text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Staff Management</h2>
         <Btn size="sm" variant="mango" onClick={() => setShowAddUser(true)}><Plus size={14} /> Add Staff</Btn>
       </div>
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4 scrollable">
         <div className="max-w-2xl mx-auto">
           {isLoading ? (
             <div className="space-y-2">
@@ -2734,7 +3380,7 @@ function AdminEmployeesPage() {
                     </div>
                   </div>
                   <div className="flex gap-2 shrink-0">
-                    <Btn size="sm" variant="ghost" onClick={() => setPinReset({ userId: u.id, newPin: '' })} title="Reset PIN">
+                    <Btn size="sm" variant="ghost" onClick={() => { setPinReset({ userId: u.id, newPin: '' }); setResetPinConflictError(''); }} title={`Reset PIN for ${u.name}`}>
                       <ShieldCheck size={14} />
                     </Btn>
                     <Btn size="sm" variant="secondary"
@@ -2756,36 +3402,52 @@ function AdminEmployeesPage() {
         </div>
       </div>
 
-      <Modal open={showAddUser} onClose={() => setShowAddUser(false)} title="Add Staff Member">
+      <Modal open={showAddUser} onClose={() => { setShowAddUser(false); setPinConflictError(''); }} title="Add Staff Member">
         <div className="flex flex-col gap-4">
           <Input label="Full Name" value={newUser.name} onChange={v => setNewUser(p => ({ ...p, name: v }))} autoFocus />
           <Select label="Role" value={newUser.role} onChange={v => setNewUser(p => ({ ...p, role: v as 'crew' | 'admin' }))}
             options={[{ value: 'crew', label: 'Staff / Crew' }, { value: 'admin', label: 'Admin' }]} />
-          <Input label="6-Digit PIN" type="password" value={newUser.pin} maxLength={6} placeholder="Enter 6 digits"
-            onChange={v => setNewUser(p => ({ ...p, pin: v.replace(/\D/g, '').slice(0, 6) }))} />
-          {newUser.pin.length > 0 && newUser.pin.length < 6 && (
-            <p className="text-xs text-amber-600 font-medium">{6 - newUser.pin.length} more digit(s) needed</p>
-          )}
+          <div>
+            <Input label="6-Digit PIN" type="password" value={newUser.pin} maxLength={6} placeholder="Enter 6 digits"
+              onChange={v => { setNewUser(p => ({ ...p, pin: v.replace(/\D/g, '').slice(0, 6) })); setPinConflictError(''); }} />
+            {newUser.pin.length > 0 && newUser.pin.length < 6 && (
+              <p className="text-xs text-amber-600 font-medium mt-1">{6 - newUser.pin.length} more digit(s) needed</p>
+            )}
+            {pinConflictError && (
+              <div className="flex items-center gap-2 text-red-600 text-xs mt-2 px-3 py-2 rounded-xl bg-red-50 border border-red-100 font-medium">
+                <AlertTriangle size={12} /> {pinConflictError}
+              </div>
+            )}
+            <p className="text-xs text-gray-400 mt-1.5">PINs must be unique across all staff members.</p>
+          </div>
           <Divider />
           <div className="flex gap-2">
-            <Btn variant="secondary" onClick={() => setShowAddUser(false)} className="flex-1">Cancel</Btn>
+            <Btn variant="secondary" onClick={() => { setShowAddUser(false); setPinConflictError(''); }} className="flex-1">Cancel</Btn>
             <Btn variant="mango" onClick={handleAddUser} loading={createUser.isPending}
               disabled={!newUser.name || newUser.pin.length !== 6} className="flex-1">Create Staff</Btn>
           </div>
         </div>
       </Modal>
 
-      <Modal open={!!pinReset} onClose={() => setPinReset(null)} title="Reset Staff PIN">
+      <Modal open={!!pinReset} onClose={() => { setPinReset(null); setResetPinConflictError(''); }} title="Reset Staff PIN">
         <div className="flex flex-col gap-4">
           <p className="text-sm text-gray-500">Enter a new 6-digit PIN. Admin PIN will be required to confirm.</p>
-          <Input label="New 6-Digit PIN" type="password" value={pinReset?.newPin ?? ''} maxLength={6} placeholder="Enter 6 digits"
-            onChange={v => setPinReset(p => p ? { ...p, newPin: v.replace(/\D/g, '').slice(0, 6) } : null)} />
-          {pinReset?.newPin && pinReset.newPin.length < 6 && (
-            <p className="text-xs text-amber-600 font-medium">{6 - pinReset.newPin.length} more digit(s) needed</p>
-          )}
+          <div>
+            <Input label="New 6-Digit PIN" type="password" value={pinReset?.newPin ?? ''} maxLength={6} placeholder="Enter 6 digits"
+              onChange={v => { setPinReset(p => p ? { ...p, newPin: v.replace(/\D/g, '').slice(0, 6) } : null); setResetPinConflictError(''); }} />
+            {pinReset?.newPin && pinReset.newPin.length < 6 && (
+              <p className="text-xs text-amber-600 font-medium mt-1">{6 - pinReset.newPin.length} more digit(s) needed</p>
+            )}
+            {resetPinConflictError && (
+              <div className="flex items-center gap-2 text-red-600 text-xs mt-2 px-3 py-2 rounded-xl bg-red-50 border border-red-100 font-medium">
+                <AlertTriangle size={12} /> {resetPinConflictError}
+              </div>
+            )}
+            <p className="text-xs text-gray-400 mt-1.5">PINs must be unique across all staff members.</p>
+          </div>
           <Divider />
           <div className="flex gap-2">
-            <Btn variant="secondary" onClick={() => setPinReset(null)} className="flex-1">Cancel</Btn>
+            <Btn variant="secondary" onClick={() => { setPinReset(null); setResetPinConflictError(''); }} className="flex-1">Cancel</Btn>
             <Btn variant="mango" onClick={handleResetPin} loading={resetPin.isPending}
               disabled={pinReset?.newPin.length !== 6} className="flex-1">Reset PIN</Btn>
           </div>
@@ -2812,6 +3474,14 @@ function AdminSettingsPage() {
     toast('Settings saved');
   };
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 's') { e.preventDefault(); if (dirty) handleSave(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [dirty, form]);
+
   const fields: { key: string; label: string; type?: string; hint?: string }[] = [
     { key: 'store_name',       label: 'Store Name' },
     { key: 'store_address',    label: 'Store Address' },
@@ -2827,18 +3497,23 @@ function AdminSettingsPage() {
         style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.04)' }}>
         <h2 className="text-sm font-800 text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>System Settings</h2>
         {dirty && (
-          <Btn variant="mango" size="sm" onClick={handleSave} loading={updateSettings.isPending}>
+          <Btn variant="mango" size="sm" onClick={handleSave} loading={updateSettings.isPending} title="Save (Ctrl+S)">
             <Save size={14} /> Save Changes
           </Btn>
         )}
       </div>
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4 scrollable">
         {isLoading ? (
           <div className="max-w-md mx-auto space-y-3">
             {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-16 shimmer rounded-2xl" />)}
           </div>
         ) : (
           <div className="max-w-md mx-auto">
+            {dirty && (
+              <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-700 font-medium">
+                <Save size={12} /> Unsaved changes · Press Ctrl+S to save quickly
+              </div>
+            )}
             <div className="bg-white border border-gray-150 rounded-2xl shadow-sm overflow-hidden">
               {fields.map((f, idx) => (
                 <div key={f.key} className={clsx('px-5 py-4', idx > 0 && 'border-t border-gray-100')}>
@@ -2904,7 +3579,7 @@ function AdminAuditPage() {
         <Input label="From" type="date" value={dateFrom} onChange={setDateFrom} className="w-36" />
         <Input label="To" type="date" value={dateTo} onChange={setDateTo} className="w-36" />
       </div>
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4 scrollable">
         {isLoading ? (
           <div className="max-w-3xl mx-auto space-y-2">
             {Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-16 shimmer rounded-2xl" />)}
@@ -2949,7 +3624,7 @@ function AdminAuditPage() {
   );
 }
 
-// ─── App Shell ────────────────────────────────────────────────
+// ─── App Shell (responsive wrapper added) ────────────────────────────────
 function AppShell() {
   const { page } = useUIStore();
   const { user } = useAuthStore();
@@ -2968,12 +3643,14 @@ function AppShell() {
   const currentPage: Page = adminPages.includes(page) && user?.role !== 'admin' ? 'pos' : page;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
-      <Header />
-      <main className="flex-1 overflow-hidden">
-        {pageMap[currentPage] ?? <POSPage />}
-      </main>
-      <PinModal />
+    <div className="w-full h-full flex flex-col" style={{ background: 'var(--surface-page)' }}>
+      <div className="max-w-screen-2xl mx-auto w-full h-full flex flex-col overflow-hidden">
+        <Header />
+        <main className="flex-1 overflow-hidden" role="main">
+          {pageMap[currentPage] ?? <POSPage />}
+        </main>
+        <PinModal />
+      </div>
     </div>
   );
 }
@@ -2983,7 +3660,6 @@ export default function App() {
 
   useEffect(() => {
     if (user && token) {
-      // Validate token is still alive
       fetch(`${import.meta.env.VITE_API_URL ?? ''}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       })

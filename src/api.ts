@@ -40,10 +40,21 @@ function useApi() {
 }
 
 // ─── Auth ─────────────────────────────────────────────────────
+
+// Unauthenticated – used by the login page
 export function useUsersList() {
   return useQuery({
     queryKey: ['users-list'],
     queryFn: () => apiFetch<User[]>('/auth/users'),
+  })
+}
+
+// Authenticated – used inside the app (Authorize modal, etc.)
+export function useUsersListAuth() {
+  const api = useApi()
+  return useQuery({
+    queryKey: ['users-list-auth'],
+    queryFn: () => api.get<User[]>('/auth/users'),
   })
 }
 
@@ -60,7 +71,7 @@ export function useVerifyPin() {
   const api = useApi()
   return useMutation({
     mutationFn: (body: { user_id: string; pin: string; required_role?: 'admin' }) =>
-      api.post<{ verified: boolean; role: string }>('/auth/verify-pin', body),
+      api.post<{ verified: boolean; role: string; user_id: string; user_name: string }>('/auth/verify-pin', body),
   })
 }
 
@@ -247,8 +258,14 @@ export function useVoidSale() {
   const api = useApi()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
-      api.post(`/sales/${id}/void`, { reason }),
+    mutationFn: ({ id, reason, actioned_by_user_id, actioned_by_name }: {
+      id: string;
+      reason: string;
+      item_indices?: number[];
+      actioned_by_user_id?: string;
+      actioned_by_name?: string;
+    }) =>
+      api.post(`/sales/${id}/void`, { reason, actioned_by_user_id, actioned_by_name }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
   })
 }
@@ -257,8 +274,14 @@ export function useRefundSale() {
   const api = useApi()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
-      api.post(`/sales/${id}/refund`, { reason }),
+    mutationFn: ({ id, reason, actioned_by_user_id, actioned_by_name }: {
+      id: string;
+      reason: string;
+      item_indices?: number[];
+      actioned_by_user_id?: string;
+      actioned_by_name?: string;
+    }) =>
+      api.post(`/sales/${id}/refund`, { reason, actioned_by_user_id, actioned_by_name }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
   })
 }
@@ -277,8 +300,30 @@ export function useReprintSale() {
   const api = useApi()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => api.post(`/sales/${id}/reprint`, {}),
+    mutationFn: ({ id, actioned_by_user_id, actioned_by_name }: {
+      id: string;
+      actioned_by_user_id?: string;
+      actioned_by_name?: string;
+    }) => api.post(`/sales/${id}/reprint`, { actioned_by_user_id, actioned_by_name }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
+  })
+}
+
+// ─── Edit Sale ────────────────────────────────────────────────
+export function useEditSale() {
+  const api = useApi()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, ...body }: {
+      id: string;
+      note?: string;
+      payments?: { method: string; amount: number }[];
+      tendered_amount?: number;
+    }) => api.put(`/sales/${id}`, body),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['sales'] })
+      qc.invalidateQueries({ queryKey: ['sale', vars.id] })
+    },
   })
 }
 
