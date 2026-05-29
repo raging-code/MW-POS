@@ -1,5 +1,10 @@
 # React + TypeScript + Vite
 
+## Deploy new index.ts (backend)
+cd C:\Users\eugen\pos-system\worker or cd \File location worker folder
+npx wrangler deploy
+
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

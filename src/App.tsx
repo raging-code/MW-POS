@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { clsx } from 'clsx';
 import {
   ShoppingCart, Search, X, Plus, Minus, ChevronDown, ChevronUp,
@@ -7,6 +7,7 @@ import {
   AlertTriangle, Printer, Trash2, Edit2, RefreshCw,
   DollarSign, TrendingUp, Menu as MenuIcon, ShieldCheck,
   ArrowLeft, Save, ChevronRight, Coffee, Tag, Maximize, Minimize,
+  ArrowUp, ArrowDown, FileText,
 } from 'lucide-react';
 import { useAuthStore, useCartStore, useUIStore } from './store';
 import type {
@@ -26,6 +27,7 @@ import {
   useAuditLogs, useToggleAvailability, useCreateMenuItem,
   useUpdateMenuItem, useDeleteMenuItem, useCreateCategory,
   useUpdateAddon, useCreateAddon, useEditSale,
+  useDeleteCategory, useReorderCategory, useDetailedSalesReport,
 } from './api';
 
 // ─── Category colour palette ───────────────────────────────────
@@ -329,7 +331,6 @@ function formatAuditEntry(log: AuditLog): { title: string; detail: string | null
 const PIN_MAX_ATTEMPTS = 5;
 const PIN_LOCKOUT_MS = 60_000;
 
-// Per-session lockout store (not persisted — resets on page reload, which is fine)
 const pinLockoutState = {
   attempts: 0,
   lockedUntil: 0,
@@ -346,8 +347,6 @@ const pinLockoutState = {
 };
 
 // ─── ANY-USER PIN Modal ───────────────────────────────────────
-// For sensitive actions: any user can authenticate using their own PIN
-// Returns { verified, user_id, user_name, role } so caller can log who did it
 function AnyUserPinModal({
   open, onClose, onSuccess, title = '🔒 Verify Identity',
   description = 'Any staff member may authorize this action using their own PIN.',
@@ -371,7 +370,6 @@ function AnyUserPinModal({
     if (open) { setPin(''); setError(''); setSelectedUser(null); }
   }, [open]);
 
-  // Lockout countdown
   useEffect(() => {
     if (!locked) return;
     const iv = setInterval(() => {
@@ -530,7 +528,6 @@ function PinModal() {
     if (pinModal.open) { setPin(''); setError(''); }
   }, [pinModal.open]);
 
-  // Lockout countdown
   useEffect(() => {
     if (!locked) return;
     const iv = setInterval(() => {
@@ -723,7 +720,6 @@ function LoginPage() {
   const [locked, setLocked] = useState(false);
   const [lockSecs, setLockSecs] = useState(0);
 
-  // Lockout countdown
   useEffect(() => {
     if (!locked) return;
     const iv = setInterval(() => {
@@ -915,7 +911,6 @@ function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Track fullscreen state
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
@@ -1033,7 +1028,6 @@ function Header() {
       </div>
 
       <div className="flex items-center gap-2 ml-auto">
-        {/* Fullscreen toggle */}
         <button
           onClick={toggleFullscreen}
           title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
@@ -1549,7 +1543,6 @@ function POSPage() {
         </button>
       </div>
 
-      {/* Clear cart confirm */}
       <ConfirmDialog
         open={showClearConfirm}
         onClose={() => setShowClearConfirm(false)}
@@ -1577,10 +1570,7 @@ function POSPage() {
   );
 }
 
-// ─── Cart Item Row — NEW LAYOUT ────────────────────────────────
-// Row 1: ITEM NAME | SIZE | PRICE
-// Row 2: QTY BUTTONS | ADD-ONS BTN
-// Row 3: DISCOUNT: SC PWD
+// ─── Cart Item Row ────────────────────────────────────────────
 function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }) {
   const cart = useCartStore();
   const [showAddonPicker, setShowAddonPicker] = useState(false);
@@ -1590,10 +1580,8 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
 
   return (
     <article className="cart-item-row rounded-2xl overflow-hidden border border-gray-200 bg-white shadow-sm" aria-label={`${item.item_name} in cart`}>
-      {/* Accent top bar */}
       <span className="block h-0.5 w-full" style={{ backgroundColor: accentColor }} />
 
-      {/* Row 1: Item name | Size | Price */}
       <div className="flex items-start justify-between gap-1.5 px-3 pt-2.5 pb-1">
         <span className="text-sm font-700 text-gray-900 leading-snug flex-1 min-w-0 truncate" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
           {item.item_name}
@@ -1614,9 +1602,7 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
         </div>
       </div>
 
-      {/* Row 2: Qty controls | Add-ons button */}
       <div className="flex items-center gap-2 px-3 py-1.5">
-        {/* Qty controls */}
         <div className="flex items-center gap-1 bg-gray-50 rounded-xl border border-gray-200 p-0.5">
           <button onClick={() => cart.updateQty(item.cart_key, -1)} aria-label={`Decrease quantity of ${item.item_name}`}
             className="w-7 h-7 rounded-lg hover:bg-red-50 hover:text-red-500 flex items-center justify-center text-gray-500 transition-colors">
@@ -1632,7 +1618,6 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
           </button>
         </div>
 
-        {/* Add-ons button */}
         <button
           onClick={() => setShowAddonPicker(true)}
           className="flex-1 flex items-center gap-1.5 text-xs font-600 transition-colors px-2.5 py-1.5 rounded-xl
@@ -1651,14 +1636,12 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
           )}
         </button>
 
-        {/* Remove button */}
         <button onClick={() => cart.removeItem(item.cart_key)} aria-label={`Remove ${item.item_name}`}
           className="w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors shrink-0">
           <X size={13} />
         </button>
       </div>
 
-      {/* Row 3: Discount */}
       <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
         <span className="text-xs text-gray-400 font-medium">Discount:</span>
         <button
@@ -2170,7 +2153,6 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
   const [dropReason, setDropReason] = useState('');
   const [tab, setTab] = useState<'overview' | 'close' | 'drop'>('overview');
 
-  // Any-user PIN for shift actions
   const [showAnyPin, setShowAnyPin] = useState(false);
   const [pendingAction, setPendingAction] = useState<'open' | 'close' | 'drop' | null>(null);
 
@@ -2534,7 +2516,6 @@ function EditSaleModal({ sale, onClose, onDone }: { sale: SaleDetail; onClose: (
     <>
       <Modal open onClose={onClose} title={`✏️ Edit Sale — ${sale.receipt_number}`} maxWidth="max-w-md">
         <div className="flex flex-col gap-5">
-          {/* Items summary (read-only) */}
           <div className="rounded-2xl border border-gray-200 p-3.5 bg-gray-50">
             <p className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
               style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Items (read-only)</p>
@@ -2552,7 +2533,6 @@ function EditSaleModal({ sale, onClose, onDone }: { sale: SaleDetail; onClose: (
             </div>
           </div>
 
-          {/* Editable note */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-700 text-gray-500 uppercase tracking-widest"
               style={{ fontFamily: 'var(--font-display)', fontWeight: 700, letterSpacing: '0.08em' }}>
@@ -2565,7 +2545,6 @@ function EditSaleModal({ sale, onClose, onDone }: { sale: SaleDetail; onClose: (
                 resize-none font-medium transition-colors" />
           </div>
 
-          {/* Editable payments */}
           <div>
             <div className="flex items-center justify-between mb-2.5">
               <p className="text-xs font-800 text-gray-500 uppercase tracking-widest"
@@ -2603,7 +2582,6 @@ function EditSaleModal({ sale, onClose, onDone }: { sale: SaleDetail; onClose: (
             )}
           </div>
 
-          {/* Tendered amount (if cash) */}
           {hasCash && (
             <Input label="Cash Tendered (₱)" type="number" value={tendered} min={0} step={0.01}
               onChange={setTendered} placeholder="Amount given by customer" />
@@ -2853,7 +2831,6 @@ function SalesPage() {
         />
       )}
 
-      {/* Delete modal — reason first, then PIN */}
       <Modal open={deleteModal} onClose={() => setDeleteModal(false)} title="Delete Sale">
         <div className="flex flex-col gap-4">
           <p className="text-sm text-gray-500">Please provide a reason for deletion.</p>
@@ -2884,414 +2861,7 @@ function SalesPage() {
   );
 }
 
-// ─── Admin Dashboard ──────────────────────────────────────────
-function AdminDashboardPage() {
-  const [dateFrom, setDateFrom] = useState(new Date().toISOString().slice(0, 10));
-  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
-  const { data: report, isLoading } = useSalesReport({ date_from: dateFrom, date_to: dateTo });
-  const { data: shift } = useCurrentShift();
-  const { navigate } = useUIStore();
-
-  return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
-      <div className="px-4 py-3 bg-white border-b border-gray-150 shrink-0 flex gap-3 items-end flex-wrap"
-        style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.04)' }}>
-        <Input label="From" type="date" value={dateFrom} onChange={setDateFrom} className="w-36" />
-        <Input label="To" type="date" value={dateTo} onChange={setDateTo} className="w-36" />
-      </div>
-      <div className="flex-1 overflow-y-auto p-4 scrollable">
-        {isLoading ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-4xl mx-auto">
-            {Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-28 shimmer rounded-2xl" />)}
-          </div>
-        ) : (
-          <div className="max-w-4xl mx-auto flex flex-col gap-5">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <KpiCard icon={<DollarSign size={18} />} label="Revenue" value={fmt(report?.total_revenue ?? 0)} color="green" />
-              <KpiCard icon={<Receipt size={18} />} label="Transactions" value={String(report?.transaction_count ?? 0)} color="blue" />
-              <KpiCard icon={<TrendingUp size={18} />} label="Avg Sale"
-                value={fmt(report?.transaction_count ? (report.total_revenue / report.transaction_count) : 0)} color="yellow" />
-              <KpiCard icon={<Tag size={18} />} label="Discounts" value={fmt(report?.total_discount ?? 0)} color="red" />
-            </div>
-
-            <div className="bg-white border border-gray-150 rounded-2xl p-5 shadow-sm">
-              <h3 className="text-sm font-800 text-gray-800 mb-4" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
-                Payment Breakdown
-              </h3>
-              <div className="flex flex-col gap-4">
-                {(Object.entries(report?.payment_breakdown ?? {}) as [string, number][]).map(([method, amount]) => {
-                  const pct = report?.total_revenue ? (amount / report.total_revenue) * 100 : 0;
-                  const barColor = method === 'cash' ? 'var(--leaf-green)' : method === 'gcash' ? '#E8A000' : 'var(--warrior-red)';
-                  return (
-                    <div key={method}>
-                      <div className="flex justify-between text-sm mb-2">
-                        <span className="text-gray-600 font-700 uppercase text-xs tracking-wider"
-                          style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{method}</span>
-                        <span className="text-gray-900 font-800 text-sm" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
-                          {fmt(amount)}
-                          <span className="text-gray-400 font-medium text-xs ml-2">({pct.toFixed(0)}%)</span>
-                        </span>
-                      </div>
-                      <div className="h-3 bg-gray-100 rounded-full overflow-hidden" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
-                        <div className="h-full rounded-full transition-all duration-700"
-                          style={{ width: `${pct}%`, backgroundColor: barColor }} />
-                      </div>
-                    </div>
-                  );
-                })}
-                {!Object.keys(report?.payment_breakdown ?? {}).length && (
-                  <p className="text-gray-400 text-sm text-center py-4">No payment data for this period</p>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-white border border-gray-150 rounded-2xl p-5 shadow-sm">
-              <h3 className="text-sm font-800 text-gray-800 mb-4" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Current Shift</h3>
-              {shift ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <StatCard label="Starting Float" value={fmt(shift.starting_float)} />
-                  <StatCard label="Cash Sales" value={fmt(shift.payment_totals?.cash ?? 0)} />
-                  <StatCard label="GCash / Maya" value={fmt((shift.payment_totals?.gcash ?? 0) + (shift.payment_totals?.maya ?? 0))} accent />
-                </div>
-              ) : (
-                <div className="text-center text-gray-400 py-6 text-sm">No shift currently open</div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
-              {([
-                { label: 'Manage Menu',  page: 'admin_menu' as Page,      icon: <Coffee size={18} />,      color: '#E8A000' },
-                { label: 'Staff',        page: 'admin_employees' as Page,  icon: <Users size={18} />,       color: 'var(--leaf-green)' },
-                { label: 'Settings',     page: 'admin_settings' as Page,   icon: <Settings size={18} />,    color: 'var(--warrior-red)' },
-                { label: 'Audit Log',    page: 'admin_audit' as Page,      icon: <ShieldCheck size={18} />, color: '#7C3AED' },
-              ]).map(l => (
-                <button key={l.page} onClick={() => navigate(l.page)}
-                  className="flex flex-col items-start gap-3 px-4 py-4 bg-white border border-gray-150 rounded-2xl
-                    hover:shadow-md transition-all text-left group active:scale-98 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
-                  style={{ boxShadow: 'var(--shadow-sm)' }}>
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center transition-all"
-                    style={{ backgroundColor: l.color + '18', color: l.color }}>
-                    {l.icon}
-                  </div>
-                  <span className="text-sm font-700 text-gray-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-                    {l.label}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function KpiCard({ icon, label, value, color }: {
-  icon: React.ReactNode; label: string; value: string; color: string;
-}) {
-  const colorMap: Record<string, { bg: string; icon: string; border: string }> = {
-    green:  { bg: '#F0FDF4', icon: '#16A34A', border: '#BBF7D0' },
-    blue:   { bg: '#EFF6FF', icon: '#2563EB', border: '#BFDBFE' },
-    yellow: { bg: 'var(--mango-yellow-xl)', icon: '#D97706', border: '#FDE68A' },
-    red:    { bg: '#FFF1F2', icon: 'var(--warrior-red)', border: '#FECDD3' },
-  };
-  const c = colorMap[color];
-  return (
-    <div className="bg-white border rounded-2xl p-4 shadow-sm" style={{ borderColor: c.border }}>
-      <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
-        style={{ backgroundColor: c.bg, color: c.icon }}>
-        {icon}
-      </div>
-      <div className="text-xs font-700 text-gray-400 mb-1.5 uppercase tracking-widest"
-        style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{label}</div>
-      <div className="font-900 text-xl text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 900 }}>{value}</div>
-    </div>
-  );
-}
-
-// ─── Admin Menu Page ──────────────────────────────────────────
-function AdminMenuPage() {
-  const { data: menuData, isLoading } = useMenu();
-  const createCategory = useCreateCategory();
-  const createItem = useCreateMenuItem();
-  const updateItem = useUpdateMenuItem();
-  const deleteItem = useDeleteMenuItem();
-  const toggleAvailability = useToggleAvailability();
-  const createAddon = useCreateAddon();
-  const updateAddon = useUpdateAddon();
-
-  const [tab, setTab] = useState<'items' | 'addons'>('items');
-  const [newCatName, setNewCatName] = useState('');
-  const [showAddItem, setShowAddItem] = useState(false);
-  const [showAddAddon, setShowAddAddon] = useState(false);
-  const [editItem, setEditItem] = useState<MenuItem | null>(null);
-  const [newItem, setNewItem] = useState({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }] });
-  const [newAddon, setNewAddon] = useState({ name: '', price: '' });
-
-  const categories = menuData?.categories ?? [];
-  const allAddons = menuData?.addons ?? [];
-
-  const handleAddCategory = async () => {
-    if (!newCatName.trim()) return;
-    await createCategory.mutateAsync({ name: newCatName, sort_order: categories.length });
-    setNewCatName('');
-    toast('Category added');
-  };
-
-  const handleAddItem = async () => {
-    const sizes = newItem.sizes.filter(s => s.name && s.price).map(s => ({ name: s.name, price: parseFloat(s.price) }));
-    if (!newItem.name || !sizes.length) return;
-    await createItem.mutateAsync({ name: newItem.name, category_id: newItem.category_id || undefined, sizes });
-    setNewItem({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }] });
-    setShowAddItem(false);
-    toast('Item added');
-  };
-
-  const handleAddAddon = async () => {
-    if (!newAddon.name || !newAddon.price) return;
-    await createAddon.mutateAsync({ name: newAddon.name, price: parseFloat(newAddon.price) });
-    setNewAddon({ name: '', price: '' });
-    setShowAddAddon(false);
-    toast('Add-on added');
-  };
-
-  const [editForm, setEditForm] = useState<{
-    name: string; category_id: string;
-    sizes: { id?: string; name: string; price: string }[];
-  } | null>(null);
-
-  const openEditItem = (item: MenuItem) => {
-    setEditItem(item);
-    setEditForm({ name: item.name, category_id: item.category_id ?? '', sizes: item.sizes.map(s => ({ id: s.id, name: s.name, price: String(s.price) })) });
-  };
-
-  const handleEditItem = async () => {
-    if (!editItem || !editForm) return;
-    const sizes = editForm.sizes.filter(s => s.name && s.price).map(s => ({ ...(s.id ? { id: s.id } : {}), name: s.name, price: parseFloat(s.price) }));
-    if (!editForm.name || !sizes.length) return;
-    await updateItem.mutateAsync({ id: editItem.id, name: editForm.name, category_id: editForm.category_id || undefined, sizes });
-    setEditItem(null); setEditForm(null);
-    toast('Item updated');
-  };
-
-  return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
-      <div className="px-4 py-3 bg-white border-b border-gray-150 shrink-0 flex items-center gap-3"
-        style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.04)' }}>
-        <div className="flex bg-gray-100 p-1 rounded-xl gap-1" role="tablist">
-          {(['items', 'addons'] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              role="tab" aria-selected={tab === t}
-              className={clsx('px-4 py-1.5 rounded-xl text-xs font-700 capitalize transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
-                tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              )}
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-              {t === 'items' ? 'Menu Items' : 'Add-ons'}
-            </button>
-          ))}
-        </div>
-        <Btn size="sm" variant="mango" onClick={() => tab === 'items' ? setShowAddItem(true) : setShowAddAddon(true)}>
-          <Plus size={14} /> Add {tab === 'items' ? 'Item' : 'Add-on'}
-        </Btn>
-      </div>
-      <div className="flex-1 overflow-y-auto p-4 scrollable">
-        {isLoading ? (
-          <div className="flex justify-center py-12"><RefreshCw className="animate-spin text-gray-300" /></div>
-        ) : tab === 'items' ? (
-          <div className="max-w-3xl mx-auto space-y-5">
-            <div className="flex gap-2">
-              <Input value={newCatName} onChange={setNewCatName} placeholder="New category name…" className="flex-1" />
-              <Btn variant="leaf" onClick={handleAddCategory} disabled={!newCatName.trim()} loading={createCategory.isPending}>
-                <Plus size={14} /> Add Category
-              </Btn>
-            </div>
-            {categories.map((cat: Category, catIdx: number) => {
-              const color = getCategoryColor(catIdx);
-              return (
-                <div key={cat.id} className="bg-white border border-gray-150 rounded-2xl overflow-hidden shadow-sm">
-                  <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between"
-                    style={{ backgroundColor: color.lightBg }}>
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color.pill }} />
-                      <span className="font-700 text-gray-800 text-sm" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-                        {cat.name}
-                      </span>
-                    </div>
-                    <Badge color="gray">{cat.items.length} items</Badge>
-                  </div>
-                  <div className="divide-y divide-gray-100">
-                    {cat.items.map((item: MenuItem) => (
-                      <div key={item.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={clsx('text-sm font-600', item.is_active ? 'text-gray-900' : 'text-gray-400 line-through')} style={{ fontWeight: 600 }}>
-                              {item.name}
-                            </span>
-                            {!item.is_available && <Badge color="red">86'd</Badge>}
-                            {!item.is_active && <Badge color="gray">inactive</Badge>}
-                          </div>
-                          <div className="text-xs text-gray-400 mt-0.5 font-medium">
-                            {item.sizes.map(s => `${s.name}: ${fmt(s.price)}`).join(' · ')}
-                          </div>
-                        </div>
-                        <div className="flex gap-1.5 shrink-0">
-                          <button
-                            onClick={() => toggleAvailability.mutate({ id: item.id, is_available: !item.is_available })}
-                            aria-pressed={item.is_available}
-                            className={clsx('px-2.5 py-1 rounded-xl text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
-                              item.is_available
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                                : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
-                            )}
-                            style={{ fontWeight: 700 }}>
-                            {item.is_available ? '✓ Available' : "86'd"}
-                          </button>
-                          <button onClick={() => openEditItem(item)}
-                            className="p-2 rounded-xl text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
-                            <Edit2 size={13} />
-                          </button>
-                          <button
-                            onClick={async () => { if (confirm(`Delete "${item.name}"?`)) await deleteItem.mutateAsync(item.id); }}
-                            className="p-2 rounded-xl text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    {cat.items.length === 0 && (
-                      <div className="px-4 py-4 text-xs text-gray-400 text-center">No items yet</div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="max-w-2xl mx-auto">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {allAddons.map((addon: Addon) => (
-                <div key={addon.id}
-                  className="flex items-center justify-between bg-white border border-gray-150 rounded-2xl px-4 py-3.5 shadow-sm">
-                  <div>
-                    <div className="text-gray-900 font-700 text-sm" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{addon.name}</div>
-                    <div className="text-xs font-800 mt-0.5 text-amber-700" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
-                      +{fmt(addon.price)}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => updateAddon.mutate({ id: addon.id, is_available: !addon.is_available })}
-                    aria-pressed={addon.is_available}
-                    className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
-                      addon.is_available
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                        : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
-                    )}
-                    style={{ fontWeight: 700 }}>
-                    {addon.is_available ? 'Available' : 'Unavailable'}
-                  </button>
-                </div>
-              ))}
-              {!allAddons.length && <div className="col-span-2 text-center text-gray-400 py-10">No add-ons yet</div>}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <Modal open={showAddItem} onClose={() => setShowAddItem(false)} title="Add Menu Item" maxWidth="max-w-md">
-        <div className="flex flex-col gap-4">
-          <Input label="Item Name" value={newItem.name} onChange={v => setNewItem(p => ({ ...p, name: v }))} autoFocus />
-          <Select label="Category" value={newItem.category_id}
-            onChange={v => setNewItem(p => ({ ...p, category_id: v }))}
-            options={[{ value: '', label: '— No category —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
-          <div>
-            <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Sizes & Prices</div>
-            {newItem.sizes.map((s, i) => (
-              <div key={i} className="flex gap-2 mb-2 items-start">
-                <Input value={s.name} onChange={v => setNewItem(p => ({ ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, name: v } : sz) }))}
-                  placeholder="Size name" className="flex-1" />
-                <Input type="number" value={s.price}
-                  onChange={v => setNewItem(p => ({ ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, price: v } : sz) }))}
-                  placeholder="Price" className="w-24" />
-                {newItem.sizes.length > 1 && (
-                  <button onClick={() => setNewItem(p => ({ ...p, sizes: p.sizes.filter((_, j) => j !== i) }))}
-                    className="text-gray-400 hover:text-red-500 mt-2.5 p-1.5 rounded-lg hover:bg-red-50 transition-colors">
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-            ))}
-            <Btn size="sm" variant="ghost" onClick={() => setNewItem(p => ({ ...p, sizes: [...p.sizes, { name: '', price: '' }] }))}>
-              <Plus size={12} /> Add Size
-            </Btn>
-          </div>
-          <Divider />
-          <div className="flex gap-2">
-            <Btn variant="secondary" onClick={() => setShowAddItem(false)} className="flex-1">Cancel</Btn>
-            <Btn variant="mango" onClick={handleAddItem} loading={createItem.isPending}
-              disabled={!newItem.name || newItem.sizes.every(s => !s.price)} className="flex-1">Add Item</Btn>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal open={!!editItem} onClose={() => { setEditItem(null); setEditForm(null); }} title={`Edit: ${editItem?.name}`} maxWidth="max-w-md">
-        {editForm && (
-          <div className="flex flex-col gap-4">
-            <Input label="Item Name" value={editForm.name} onChange={v => setEditForm(p => p ? { ...p, name: v } : null)} />
-            <Select label="Category" value={editForm.category_id}
-              onChange={v => setEditForm(p => p ? { ...p, category_id: v } : null)}
-              options={[{ value: '', label: '— No category —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
-            <div>
-              <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
-                style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Sizes & Prices</div>
-              {editForm.sizes.map((s, i) => (
-                <div key={i} className="flex gap-2 mb-2 items-start">
-                  <Input value={s.name}
-                    onChange={v => setEditForm(p => p ? { ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, name: v } : sz) } : null)}
-                    placeholder="Size name" className="flex-1" />
-                  <Input type="number" value={s.price}
-                    onChange={v => setEditForm(p => p ? { ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, price: v } : sz) } : null)}
-                    placeholder="Price" className="w-24" />
-                  {editForm.sizes.length > 1 && (
-                    <button onClick={() => setEditForm(p => p ? { ...p, sizes: p.sizes.filter((_, j) => j !== i) } : null)}
-                      className="text-gray-400 hover:text-red-500 mt-2.5 p-1.5 rounded-lg hover:bg-red-50 transition-colors">
-                      <X size={14} />
-                    </button>
-                  )}
-                </div>
-              ))}
-              <Btn size="sm" variant="ghost" onClick={() => setEditForm(p => p ? { ...p, sizes: [...p.sizes, { name: '', price: '' }] } : null)}>
-                <Plus size={12} /> Add Size
-              </Btn>
-            </div>
-            <Divider />
-            <div className="flex gap-2">
-              <Btn variant="secondary" onClick={() => { setEditItem(null); setEditForm(null); }} className="flex-1">Cancel</Btn>
-              <Btn variant="mango" onClick={handleEditItem} loading={updateItem.isPending}
-                disabled={!editForm.name || editForm.sizes.every(s => !s.price)} className="flex-1">
-                <Save size={14} /> Save Changes
-              </Btn>
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      <Modal open={showAddAddon} onClose={() => setShowAddAddon(false)} title="Add Add-on">
-        <div className="flex flex-col gap-4">
-          <Input label="Add-on Name" value={newAddon.name} onChange={v => setNewAddon(p => ({ ...p, name: v }))} autoFocus />
-          <Input label="Price (₱)" type="number" value={newAddon.price} onChange={v => setNewAddon(p => ({ ...p, price: v }))} min={0} step={0.01} />
-          <div className="flex gap-2">
-            <Btn variant="secondary" onClick={() => setShowAddAddon(false)} className="flex-1">Cancel</Btn>
-            <Btn variant="mango" onClick={handleAddAddon} loading={createAddon.isPending}
-              disabled={!newAddon.name || !newAddon.price} className="flex-1">Add</Btn>
-          </div>
-        </div>
-      </Modal>
-    </div>
-  );
-}
-
-// ─── Admin Staff Page ─────────────────────────────────────────
+// ─── Admin Employees Page ────────────────────────────────────
 function AdminEmployeesPage() {
   const { data: users, isLoading } = useUsers();
   const { data: usersList } = useUsersList();
@@ -3534,7 +3104,7 @@ function AdminSettingsPage() {
   );
 }
 
-// ─── Admin Audit Log Page ─────────────────────────────────────
+// ─── Admin Audit Log Page ────────────────────────────────────
 function AdminAuditPage() {
   const [entityType, setEntityType] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -3624,7 +3194,558 @@ function AdminAuditPage() {
   );
 }
 
-// ─── App Shell (responsive wrapper added) ────────────────────────────────
+// ─── KPI Card ──────────────────────────────────────────────────
+function KpiCard({ icon, label, value, color }: {
+  icon: React.ReactNode; label: string; value: string; color: string;
+}) {
+  const colorMap: Record<string, { bg: string; icon: string; border: string }> = {
+    green:  { bg: '#F0FDF4', icon: '#16A34A', border: '#BBF7D0' },
+    blue:   { bg: '#EFF6FF', icon: '#2563EB', border: '#BFDBFE' },
+    yellow: { bg: 'var(--mango-yellow-xl)', icon: '#D97706', border: '#FDE68A' },
+    red:    { bg: '#FFF1F2', icon: 'var(--warrior-red)', border: '#FECDD3' },
+    gray:   { bg: '#F9FAFB', icon: '#6B7280', border: '#E5E7EB' },
+  };
+  const c = colorMap[color] ?? colorMap.gray; // fallback to gray if unknown
+  return (
+    <div className="bg-white border rounded-2xl p-4 shadow-sm" style={{ borderColor: c.border }}>
+      <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
+        style={{ backgroundColor: c.bg, color: c.icon }}>
+        {icon}
+      </div>
+      <div className="text-xs font-700 text-gray-400 mb-1.5 uppercase tracking-widest"
+        style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{label}</div>
+      <div className="font-900 text-xl text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 900 }}>{value}</div>
+    </div>
+  );
+}
+
+// ================================================================
+// ADMIN MENU PAGE – now with delete and reorder for categories
+// ================================================================
+function AdminMenuPage() {
+  const { data: menuData, isLoading } = useMenu();
+  const createCategory = useCreateCategory();
+  const createItem = useCreateMenuItem();
+  const updateItem = useUpdateMenuItem();
+  const deleteItem = useDeleteMenuItem();
+  const toggleAvailability = useToggleAvailability();
+  const createAddon = useCreateAddon();
+  const updateAddon = useUpdateAddon();
+  const deleteCategory = useDeleteCategory();                 // NEW
+  const reorderCategory = useReorderCategory();               // NEW
+
+  const [tab, setTab] = useState<'items' | 'addons'>('items');
+  const [newCatName, setNewCatName] = useState('');
+  const [showAddItem, setShowAddItem] = useState(false);
+  const [showAddAddon, setShowAddAddon] = useState(false);
+  const [editItem, setEditItem] = useState<MenuItem | null>(null);
+  const [newItem, setNewItem] = useState({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }] });
+  const [newAddon, setNewAddon] = useState({ name: '', price: '' });
+
+  const categories = menuData?.categories ?? [];
+  const sortedCategories = [...categories].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const allAddons = menuData?.addons ?? [];
+
+  const handleAddCategory = async () => {
+    if (!newCatName.trim()) return;
+    await createCategory.mutateAsync({ name: newCatName, sort_order: categories.length });
+    setNewCatName('');
+    toast('Category added');
+  };
+
+  const handleAddItem = async () => {
+    const sizes = newItem.sizes.filter(s => s.name && s.price).map(s => ({ name: s.name, price: parseFloat(s.price) }));
+    if (!newItem.name || !sizes.length) return;
+    await createItem.mutateAsync({ name: newItem.name, category_id: newItem.category_id || undefined, sizes });
+    setNewItem({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }] });
+    setShowAddItem(false);
+    toast('Item added');
+  };
+
+  const handleAddAddon = async () => {
+    if (!newAddon.name || !newAddon.price) return;
+    await createAddon.mutateAsync({ name: newAddon.name, price: parseFloat(newAddon.price) });
+    setNewAddon({ name: '', price: '' });
+    setShowAddAddon(false);
+    toast('Add-on added');
+  };
+
+  const [editForm, setEditForm] = useState<{
+    name: string; category_id: string;
+    sizes: { id?: string; name: string; price: string }[];
+  } | null>(null);
+
+  const openEditItem = (item: MenuItem) => {
+    setEditItem(item);
+    setEditForm({ name: item.name, category_id: item.category_id ?? '', sizes: item.sizes.map(s => ({ id: s.id, name: s.name, price: String(s.price) })) });
+  };
+
+  const handleEditItem = async () => {
+    if (!editItem || !editForm) return;
+    const sizes = editForm.sizes.filter(s => s.name && s.price).map(s => ({ ...(s.id ? { id: s.id } : {}), name: s.name, price: parseFloat(s.price) }));
+    if (!editForm.name || !sizes.length) return;
+    await updateItem.mutateAsync({ id: editItem.id, name: editForm.name, category_id: editForm.category_id || undefined, sizes });
+    setEditItem(null); setEditForm(null);
+    toast('Item updated');
+  };
+
+  const moveUp = (catId: string) => reorderCategory.mutate({ id: catId, direction: 'up' });
+  const moveDown = (catId: string) => reorderCategory.mutate({ id: catId, direction: 'down' });
+
+  const handleDeleteCategory = async (catId: string) => {
+    if (!confirm('Delete this category? All items inside will become uncategorised. This action is logged.')) return;
+    await deleteCategory.mutateAsync(catId);
+    toast('Category deleted');
+  };
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
+      <div className="px-4 py-3 bg-white border-b border-gray-150 shrink-0 flex items-center gap-3"
+        style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.04)' }}>
+        <div className="flex bg-gray-100 p-1 rounded-xl gap-1" role="tablist">
+          {(['items', 'addons'] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              role="tab" aria-selected={tab === t}
+              className={clsx('px-4 py-1.5 rounded-xl text-xs font-700 capitalize transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              )}
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+              {t === 'items' ? 'Menu Items' : 'Add-ons'}
+            </button>
+          ))}
+        </div>
+        <Btn size="sm" variant="mango" onClick={() => tab === 'items' ? setShowAddItem(true) : setShowAddAddon(true)}>
+          <Plus size={14} /> Add {tab === 'items' ? 'Item' : 'Add-on'}
+        </Btn>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 scrollable">
+        {isLoading ? (
+          <div className="flex justify-center py-12"><RefreshCw className="animate-spin text-gray-300" /></div>
+        ) : tab === 'items' ? (
+          <div className="max-w-3xl mx-auto space-y-5">
+            <div className="flex gap-2">
+              <Input value={newCatName} onChange={setNewCatName} placeholder="New category name…" className="flex-1" />
+              <Btn variant="leaf" onClick={handleAddCategory} disabled={!newCatName.trim()} loading={createCategory.isPending}>
+                <Plus size={14} /> Add Category
+              </Btn>
+            </div>
+            {sortedCategories.map((cat: Category, catIdx: number) => {
+              const color = getCategoryColor(catIdx);
+              const isFirst = catIdx === 0;
+              const isLast = catIdx === sortedCategories.length - 1;
+              return (
+                <div key={cat.id} className="bg-white border border-gray-150 rounded-2xl overflow-hidden shadow-sm">
+                  <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between"
+                    style={{ backgroundColor: color.lightBg }}>
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color.pill }} />
+                      <span className="font-700 text-gray-800 text-sm" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+                        {cat.name}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Badge color="gray">{cat.items.length} items</Badge>
+                      <button onClick={() => moveUp(cat.id)} disabled={isFirst} title="Move up"
+                        className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                        <ArrowUp size={14} />
+                      </button>
+                      <button onClick={() => moveDown(cat.id)} disabled={isLast} title="Move down"
+                        className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                        <ArrowDown size={14} />
+                      </button>
+                      <button onClick={() => handleDeleteCategory(cat.id)} title="Delete category"
+                        className="p-1 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {cat.items.map((item: MenuItem) => (
+                      <div key={item.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={clsx('text-sm font-600', item.is_active ? 'text-gray-900' : 'text-gray-400 line-through')} style={{ fontWeight: 600 }}>
+                              {item.name}
+                            </span>
+                            {!item.is_available && <Badge color="red">86'd</Badge>}
+                            {!item.is_active && <Badge color="gray">inactive</Badge>}
+                          </div>
+                          <div className="text-xs text-gray-400 mt-0.5 font-medium">
+                            {item.sizes.map(s => `${s.name}: ${fmt(s.price)}`).join(' · ')}
+                          </div>
+                        </div>
+                        <div className="flex gap-1.5 shrink-0">
+                          <button
+                            onClick={() => toggleAvailability.mutate({ id: item.id, is_available: !item.is_available })}
+                            aria-pressed={item.is_available}
+                            className={clsx('px-2.5 py-1 rounded-xl text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                              item.is_available
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                            )}
+                            style={{ fontWeight: 700 }}>
+                            {item.is_available ? '✓ Available' : "86'd"}
+                          </button>
+                          <button onClick={() => openEditItem(item)}
+                            className="p-2 rounded-xl text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={async () => { if (confirm(`Delete "${item.name}"?`)) await deleteItem.mutateAsync(item.id); }}
+                            className="p-2 rounded-xl text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {cat.items.length === 0 && (
+                      <div className="px-4 py-4 text-xs text-gray-400 text-center">No items yet</div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          // addons tab (unchanged)
+          <div className="max-w-2xl mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {allAddons.map((addon: Addon) => (
+                <div key={addon.id}
+                  className="flex items-center justify-between bg-white border border-gray-150 rounded-2xl px-4 py-3.5 shadow-sm">
+                  <div>
+                    <div className="text-gray-900 font-700 text-sm" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{addon.name}</div>
+                    <div className="text-xs font-800 mt-0.5 text-amber-700" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+                      +{fmt(addon.price)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => updateAddon.mutate({ id: addon.id, is_available: !addon.is_available })}
+                    aria-pressed={addon.is_available}
+                    className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                      addon.is_available
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                        : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                    )}
+                    style={{ fontWeight: 700 }}>
+                    {addon.is_available ? 'Available' : 'Unavailable'}
+                  </button>
+                </div>
+              ))}
+              {!allAddons.length && <div className="col-span-2 text-center text-gray-400 py-10">No add-ons yet</div>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ---------- MODALS (previously missing) ---------- */}
+      {/* Add Item Modal */}
+      <Modal open={showAddItem} onClose={() => setShowAddItem(false)} title="Add Menu Item" maxWidth="max-w-md">
+        <div className="flex flex-col gap-4">
+          <Input label="Item Name" value={newItem.name} onChange={v => setNewItem(p => ({ ...p, name: v }))} autoFocus />
+          <Select label="Category" value={newItem.category_id}
+            onChange={v => setNewItem(p => ({ ...p, category_id: v }))}
+            options={[{ value: '', label: '— No category —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
+          <div>
+            <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Sizes & Prices</div>
+            {newItem.sizes.map((s, i) => (
+              <div key={i} className="flex gap-2 mb-2 items-start">
+                <Input value={s.name} onChange={v => setNewItem(p => ({ ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, name: v } : sz) }))}
+                  placeholder="Size name" className="flex-1" />
+                <Input type="number" value={s.price}
+                  onChange={v => setNewItem(p => ({ ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, price: v } : sz) }))}
+                  placeholder="Price" className="w-24" />
+                {newItem.sizes.length > 1 && (
+                  <button onClick={() => setNewItem(p => ({ ...p, sizes: p.sizes.filter((_, j) => j !== i) }))}
+                    className="text-gray-400 hover:text-red-500 mt-2.5 p-1.5 rounded-lg hover:bg-red-50 transition-colors">
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            ))}
+            <Btn size="sm" variant="ghost" onClick={() => setNewItem(p => ({ ...p, sizes: [...p.sizes, { name: '', price: '' }] }))}>
+              <Plus size={12} /> Add Size
+            </Btn>
+          </div>
+          <Divider />
+          <div className="flex gap-2">
+            <Btn variant="secondary" onClick={() => setShowAddItem(false)} className="flex-1">Cancel</Btn>
+            <Btn variant="mango" onClick={handleAddItem} loading={createItem.isPending}
+              disabled={!newItem.name || newItem.sizes.every(s => !s.price)} className="flex-1">Add Item</Btn>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit Item Modal */}
+      <Modal open={!!editItem} onClose={() => { setEditItem(null); setEditForm(null); }} title={`Edit: ${editItem?.name}`} maxWidth="max-w-md">
+        {editForm && (
+          <div className="flex flex-col gap-4">
+            <Input label="Item Name" value={editForm.name} onChange={v => setEditForm(p => p ? { ...p, name: v } : null)} />
+            <Select label="Category" value={editForm.category_id}
+              onChange={v => setEditForm(p => p ? { ...p, category_id: v } : null)}
+              options={[{ value: '', label: '— No category —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
+            <div>
+              <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
+                style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Sizes & Prices</div>
+              {editForm.sizes.map((s, i) => (
+                <div key={i} className="flex gap-2 mb-2 items-start">
+                  <Input value={s.name}
+                    onChange={v => setEditForm(p => p ? { ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, name: v } : sz) } : null)}
+                    placeholder="Size name" className="flex-1" />
+                  <Input type="number" value={s.price}
+                    onChange={v => setEditForm(p => p ? { ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, price: v } : sz) } : null)}
+                    placeholder="Price" className="w-24" />
+                  {editForm.sizes.length > 1 && (
+                    <button onClick={() => setEditForm(p => p ? { ...p, sizes: p.sizes.filter((_, j) => j !== i) } : null)}
+                      className="text-gray-400 hover:text-red-500 mt-2.5 p-1.5 rounded-lg hover:bg-red-50 transition-colors">
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <Btn size="sm" variant="ghost" onClick={() => setEditForm(p => p ? { ...p, sizes: [...p.sizes, { name: '', price: '' }] } : null)}>
+                <Plus size={12} /> Add Size
+              </Btn>
+            </div>
+            <Divider />
+            <div className="flex gap-2">
+              <Btn variant="secondary" onClick={() => { setEditItem(null); setEditForm(null); }} className="flex-1">Cancel</Btn>
+              <Btn variant="mango" onClick={handleEditItem} loading={updateItem.isPending}
+                disabled={!editForm.name || editForm.sizes.every(s => !s.price)} className="flex-1">
+                <Save size={14} /> Save Changes
+              </Btn>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Add Add-on Modal */}
+      <Modal open={showAddAddon} onClose={() => setShowAddAddon(false)} title="Add Add-on">
+        <div className="flex flex-col gap-4">
+          <Input label="Add-on Name" value={newAddon.name} onChange={v => setNewAddon(p => ({ ...p, name: v }))} autoFocus />
+          <Input label="Price (₱)" type="number" value={newAddon.price} onChange={v => setNewAddon(p => ({ ...p, price: v }))} min={0} step={0.01} />
+          <div className="flex gap-2">
+            <Btn variant="secondary" onClick={() => setShowAddAddon(false)} className="flex-1">Cancel</Btn>
+            <Btn variant="mango" onClick={handleAddAddon} loading={createAddon.isPending}
+              disabled={!newAddon.name || !newAddon.price} className="flex-1">Add</Btn>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+// ================================================================
+// DETAILED REPORT MODAL (new component)
+// ================================================================
+function DetailedReportModal({ onClose }: { onClose: () => void }) {
+  const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
+  const [dateValue, setDateValue] = useState(new Date().toISOString().slice(0, 10));
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [month, setMonth] = useState(new Date().getMonth() + 1);
+
+  let params: any = { period };
+  if (period === 'daily') {
+    params.date = dateValue;
+  } else if (period === 'weekly') {
+    const start = startOfWeek(parseISO(dateValue), { weekStartsOn: 1 });
+    const end = endOfWeek(parseISO(dateValue), { weekStartsOn: 1 });
+    params.date_from = format(start, 'yyyy-MM-dd');
+    params.date_to = format(end, 'yyyy-MM-dd');
+  } else if (period === 'monthly') {
+    params.year = year;
+    params.month = month;
+  } else if (period === 'yearly') {
+    params.year = year;
+  }
+
+  const { data, isLoading, error } = useDetailedSalesReport(params);
+
+  return (
+    <Modal open onClose={onClose} title="Detailed Sales Report" maxWidth="max-w-4xl">
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex bg-gray-100 p-1 rounded-xl" role="tablist">
+            {(['daily', 'weekly', 'monthly', 'yearly'] as const).map(p => (
+              <button key={p} onClick={() => setPeriod(p)}
+                role="tab" aria-selected={period === p}
+                className={clsx('px-4 py-1.5 rounded-xl text-xs font-700 capitalize transition-all',
+                  period === p ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                )}
+                style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+                {p}
+              </button>
+            ))}
+          </div>
+          {period === 'daily' && (
+            <Input type="date" value={dateValue} onChange={setDateValue} className="w-40" />
+          )}
+          {period === 'weekly' && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">Week of:</span>
+              <Input type="date" value={dateValue} onChange={setDateValue} className="w-40" />
+            </div>
+          )}
+          {period === 'monthly' && (
+            <div className="flex items-center gap-2">
+              <Select value={String(year)} onChange={v => setYear(Number(v))}
+                options={Array.from({length:5}, (_,i)=>({value: String(new Date().getFullYear()-2+i), label: String(new Date().getFullYear()-2+i)}))}
+                className="w-24" />
+              <Select value={String(month)} onChange={v => setMonth(Number(v))}
+                options={Array.from({length:12}, (_,i)=>({value: String(i+1), label: String(i+1).padStart(2,'0')}))}
+                className="w-20" />
+            </div>
+          )}
+          {period === 'yearly' && (
+            <Select value={String(year)} onChange={v => setYear(Number(v))}
+              options={Array.from({length:5}, (_,i)=>({value: String(new Date().getFullYear()-2+i), label: String(new Date().getFullYear()-2+i)}))}
+              className="w-24" />
+          )}
+        </div>
+
+        {isLoading ? (
+          <div className="flex justify-center py-8"><RefreshCw className="animate-spin text-gray-300" size={24} /></div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <AlertTriangle size={36} className="text-red-400 mb-3" />
+            <p className="text-red-600 text-sm font-medium">Failed to load report</p>
+            <p className="text-gray-400 text-xs mt-1">Please try again later</p>
+          </div>
+        ) : data ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <KpiCard icon={<DollarSign size={18} />} label="Total Sales" value={fmt(data.total_sales ?? 0)} color="green" />
+            <KpiCard icon={<Receipt size={18} />} label="Transactions" value={String(data.transaction_count ?? 0)} color="blue" />
+            <KpiCard icon={<TrendingUp size={18} />} label="Avg Sale" value={fmt(data.avg_sale ?? 0)} color="yellow" />
+            <KpiCard icon={<Tag size={18} />} label="Discounts" value={fmt(data.total_discount ?? 0)} color="red" />
+            <KpiCard icon={<AlertTriangle size={18} />} label="Voided" value={String(data.voided_count ?? 0)} color="red" />
+            <KpiCard icon={<RefreshCw size={18} />} label="Refunded" value={String(data.refunded_count ?? 0)} color="yellow" />
+            <KpiCard icon={<Edit2 size={18} />} label="Edited" value={String(data.edited_count ?? 0)} color="gray" />
+            <KpiCard icon={<Trash2 size={18} />} label="Deleted" value={String(data.deleted_count ?? 0)} color="gray" />
+          </div>
+        ) : (
+          <p className="text-gray-400 text-center py-8">No data for selected period.</p>
+        )}
+
+        <div className="flex justify-end">
+          <Btn variant="secondary" onClick={onClose}>Close</Btn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ================================================================
+// ADMIN DASHBOARD PAGE – with "Detailed Report" button
+// ================================================================
+function AdminDashboardPage() {
+  const [dateFrom, setDateFrom] = useState(new Date().toISOString().slice(0, 10));
+  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
+  const { data: report, isLoading } = useSalesReport({ date_from: dateFrom, date_to: dateTo });
+  const { data: shift } = useCurrentShift();
+  const { navigate } = useUIStore();
+  const [showDetailedReport, setShowDetailedReport] = useState(false);
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
+      <div className="px-4 py-3 bg-white border-b border-gray-150 shrink-0 flex gap-3 items-end flex-wrap"
+        style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.04)' }}>
+        <Input label="From" type="date" value={dateFrom} onChange={setDateFrom} className="w-36" />
+        <Input label="To" type="date" value={dateTo} onChange={setDateTo} className="w-36" />
+        <div className="flex-1" />
+        <Btn variant="mango" size="sm" onClick={() => setShowDetailedReport(true)}>
+          <FileText size={14} /> Detailed Report
+        </Btn>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 scrollable">
+        {isLoading ? (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-4xl mx-auto">
+            {Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-28 shimmer rounded-2xl" />)}
+          </div>
+        ) : (
+          <div className="max-w-4xl mx-auto flex flex-col gap-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <KpiCard icon={<DollarSign size={18} />} label="Revenue" value={fmt(report?.total_revenue ?? 0)} color="green" />
+              <KpiCard icon={<Receipt size={18} />} label="Transactions" value={String(report?.transaction_count ?? 0)} color="blue" />
+              <KpiCard icon={<TrendingUp size={18} />} label="Avg Sale"
+                value={fmt(report?.transaction_count ? (report.total_revenue / report.transaction_count) : 0)} color="yellow" />
+              <KpiCard icon={<Tag size={18} />} label="Discounts" value={fmt(report?.total_discount ?? 0)} color="red" />
+            </div>
+
+            <div className="bg-white border border-gray-150 rounded-2xl p-5 shadow-sm">
+              <h3 className="text-sm font-800 text-gray-800 mb-4" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+                Payment Breakdown
+              </h3>
+              <div className="flex flex-col gap-4">
+                {(Object.entries(report?.payment_breakdown ?? {}) as [string, number][]).map(([method, amount]) => {
+                  const pct = report?.total_revenue ? (amount / report.total_revenue) * 100 : 0;
+                  const barColor = method === 'cash' ? 'var(--leaf-green)' : method === 'gcash' ? '#E8A000' : 'var(--warrior-red)';
+                  return (
+                    <div key={method}>
+                      <div className="flex justify-between text-sm mb-2">
+                        <span className="text-gray-600 font-700 uppercase text-xs tracking-wider"
+                          style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{method}</span>
+                        <span className="text-gray-900 font-800 text-sm" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+                          {fmt(amount)}
+                          <span className="text-gray-400 font-medium text-xs ml-2">({pct.toFixed(0)}%)</span>
+                        </span>
+                      </div>
+                      <div className="h-3 bg-gray-100 rounded-full overflow-hidden" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+                        <div className="h-full rounded-full transition-all duration-700"
+                          style={{ width: `${pct}%`, backgroundColor: barColor }} />
+                      </div>
+                    </div>
+                  );
+                })}
+                {!Object.keys(report?.payment_breakdown ?? {}).length && (
+                  <p className="text-gray-400 text-sm text-center py-4">No payment data for this period</p>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-white border border-gray-150 rounded-2xl p-5 shadow-sm">
+              <h3 className="text-sm font-800 text-gray-800 mb-4" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Current Shift</h3>
+              {shift ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <StatCard label="Starting Float" value={fmt(shift.starting_float)} />
+                  <StatCard label="Cash Sales" value={fmt(shift.payment_totals?.cash ?? 0)} />
+                  <StatCard label="GCash / Maya" value={fmt((shift.payment_totals?.gcash ?? 0) + (shift.payment_totals?.maya ?? 0))} accent />
+                </div>
+              ) : (
+                <div className="text-center text-gray-400 py-6 text-sm">No shift currently open</div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+              {([
+                { label: 'Manage Menu',  page: 'admin_menu' as Page,      icon: <Coffee size={18} />,      color: '#E8A000' },
+                { label: 'Staff',        page: 'admin_employees' as Page,  icon: <Users size={18} />,       color: 'var(--leaf-green)' },
+                { label: 'Settings',     page: 'admin_settings' as Page,   icon: <Settings size={18} />,    color: 'var(--warrior-red)' },
+                { label: 'Audit Log',    page: 'admin_audit' as Page,      icon: <ShieldCheck size={18} />, color: '#7C3AED' },
+              ]).map(l => (
+                <button key={l.page} onClick={() => navigate(l.page)}
+                  className="flex flex-col items-start gap-3 px-4 py-4 bg-white border border-gray-150 rounded-2xl
+                    hover:shadow-md transition-all text-left group active:scale-98 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
+                  style={{ boxShadow: 'var(--shadow-sm)' }}>
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center transition-all"
+                    style={{ backgroundColor: l.color + '18', color: l.color }}>
+                    {l.icon}
+                  </div>
+                  <span className="text-sm font-700 text-gray-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
+                    {l.label}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      {showDetailedReport && <DetailedReportModal onClose={() => setShowDetailedReport(false)} />}
+    </div>
+  );
+}
+
+// ─── App Shell (full width – maximizing viewfront) ──────────
 function AppShell() {
   const { page } = useUIStore();
   const { user } = useAuthStore();
@@ -3644,30 +3765,66 @@ function AppShell() {
 
   return (
     <div className="w-full h-full flex flex-col" style={{ background: 'var(--surface-page)' }}>
-      <div className="max-w-screen-2xl mx-auto w-full h-full flex flex-col overflow-hidden">
-        <Header />
-        <main className="flex-1 overflow-hidden" role="main">
-          {pageMap[currentPage] ?? <POSPage />}
-        </main>
-        <PinModal />
-      </div>
+      <Header />
+      <main className="flex-1 overflow-hidden" role="main">
+        {pageMap[currentPage] ?? <POSPage />}
+      </main>
+      <PinModal />
     </div>
   );
 }
 
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode; fallback?: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: any) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('ErrorBoundary caught:', error, info)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback ?? (
+        <div className="h-full flex items-center justify-center flex-col gap-4 p-6 text-center">
+          <AlertTriangle size={48} className="text-red-400" />
+          <h2 className="text-lg font-800 text-red-700" style={{ fontFamily: 'var(--font-display)' }}>Something went wrong</h2>
+          <p className="text-gray-500 text-sm">{this.state.error?.message}</p>
+          <Btn variant="secondary" onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}>
+            Reload Page
+          </Btn>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 export default function App() {
-  const { user, token, logout } = useAuthStore();
+  const { user, token, logout } = useAuthStore()
 
   useEffect(() => {
     if (user && token) {
       fetch(`${import.meta.env.VITE_API_URL ?? ''}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-        .then(res => { if (!res.ok) logout(); })
-        .catch(() => logout());
+        .then(res => { if (!res.ok) logout() })
+        .catch(() => logout())
     }
-  }, []);
+  }, [])
 
-  if (!user || !token) return <LoginPage />;
-  return <AppShell />;
+  if (!user || !token) return <LoginPage />
+  return (
+    <ErrorBoundary>
+      <AppShell />
+    </ErrorBoundary>
+  )
 }

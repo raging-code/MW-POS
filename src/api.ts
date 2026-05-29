@@ -40,8 +40,6 @@ function useApi() {
 }
 
 // ─── Auth ─────────────────────────────────────────────────────
-
-// Unauthenticated – used by the login page
 export function useUsersList() {
   return useQuery({
     queryKey: ['users-list'],
@@ -49,7 +47,6 @@ export function useUsersList() {
   })
 }
 
-// Authenticated – used inside the app (Authorize modal, etc.)
 export function useUsersListAuth() {
   const api = useApi()
   return useQuery({
@@ -90,6 +87,30 @@ export function useCreateCategory() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (body: { name: string; sort_order?: number }) => api.post('/menu/categories', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
+  })
+}
+
+// NEW – delete category (backend must implement DELETE /menu/categories/:id)
+export function useDeleteCategory() {
+  const api = useApi()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/menu/categories/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['menu'] })
+      qc.invalidateQueries({ queryKey: ['audit-logs'] }) // will appear in logs
+    },
+  })
+}
+
+// NEW – reorder category (backend must implement PUT /menu/categories/:id/reorder)
+export function useReorderCategory() {
+  const api = useApi()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, direction }: { id: string; direction: 'up' | 'down' }) =>
+      api.put(`/menu/categories/${id}/reorder`, { direction }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })
 }
@@ -309,7 +330,6 @@ export function useReprintSale() {
   })
 }
 
-// ─── Edit Sale ────────────────────────────────────────────────
 export function useEditSale() {
   const api = useApi()
   const qc = useQueryClient()
@@ -336,6 +356,40 @@ export function useSalesReport(params?: { date_from?: string; date_to?: string }
   return useQuery({
     queryKey: ['report-sales', params],
     queryFn: () => api.get<SalesReport>(`/reports/sales?${qs}`),
+  })
+}
+
+// NEW – detailed sales report (backend must implement GET /reports/sales-detailed)
+export function useDetailedSalesReport(params: {
+  period: string;
+  date?: string;
+  date_from?: string;
+  date_to?: string;
+  year?: number;
+  month?: number;
+}) {
+  const api = useApi()
+  const qs = new URLSearchParams()
+  qs.set('period', params.period)
+  if (params.date) qs.set('date', params.date)
+  if (params.date_from) qs.set('date_from', params.date_from)
+  if (params.date_to) qs.set('date_to', params.date_to)
+  if (params.year) qs.set('year', String(params.year))
+  if (params.month) qs.set('month', String(params.month))
+
+  return useQuery({
+    queryKey: ['report-sales-detailed', params],
+    queryFn: () => api.get<{
+      total_sales: number;
+      transaction_count: number;
+      avg_sale: number;
+      total_discount: number;
+      voided_count: number;
+      refunded_count: number;
+      edited_count: number;
+      deleted_count: number;
+      payment_breakdown: Record<string, number>;
+    }>(`/reports/sales-detailed?${qs}`),
   })
 }
 

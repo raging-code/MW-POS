@@ -576,6 +576,34 @@ app.put('/api/menu/categories/:id', async (c) => {
   return jsonOk({ ok: true })
 })
 
+// NEW: PUT /api/menu/categories/:id/reorder  -- move category up/down
+app.put('/api/menu/categories/:id/reorder', async (c) => {
+  const actor = c.get('user')
+  if (actor.role !== 'admin') return jsonErr('Admin only', 403)
+  const db = c.get('db')
+  const id = c.req.param('id')
+  const body = await c.req.json<{ direction: 'up' | 'down' }>()
+
+  // Get current category
+  const cat = await db.select().from(categories).where(eq(categories.id, id)).get()
+  if (!cat) return jsonErr('Category not found', 404)
+
+  // Find the adjacent category to swap with
+  const targetSort = body.direction === 'up' ? cat.sort_order - 1 : cat.sort_order + 1
+  const adjacent = await db.select().from(categories).where(eq(categories.sort_order, targetSort)).get()
+
+  if (!adjacent) return jsonErr('Cannot move further', 400)
+
+  // Swap sort_orders
+  await db.batch([
+    db.update(categories).set({ sort_order: cat.sort_order }).where(eq(categories.id, adjacent.id)),
+    db.update(categories).set({ sort_order: adjacent.sort_order }).where(eq(categories.id, id)),
+  ])
+
+  await createAuditLog(db, actor.id, 'reorder_category', 'category', id, null, { direction: body.direction }, null)
+  return jsonOk({ ok: true })
+})
+
 app.delete('/api/menu/categories/:id', async (c) => {
   const actor = c.get('user')
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
@@ -1175,6 +1203,98 @@ app.get('/api/reports/sales', async (c) => {
     transaction_count: completedSales.length,
     payment_breakdown: paymentBreakdown,
     sales: salesList,
+  })
+})
+
+// NEW: GET /api/reports/sales-detailed — daily/weekly/monthly/yearly with void/refund/edit/delete counts
+app.get('/api/reports/sales-detailed', async (c) => {
+  const db = c.get('db')
+  // Read parameters explicitly (safer than destructuring)
+  const period = c.req.query('period')
+  const date = c.req.query('date')
+  const date_from = c.req.query('date_from')
+  const date_to = c.req.query('date_to')
+  const year = c.req.query('year')
+  const month = c.req.query('month')
+
+  console.log('sales-detailed params:', { period, date, date_from, date_to, year, month })
+
+  let startDate: string, endDate: string
+
+  if (period === 'daily' && date) {
+    startDate = date
+    endDate = date
+  } else if (period === 'weekly' && date_from && date_to) {
+    startDate = date_from
+    endDate = date_to
+  } else if (period === 'monthly' && year && month) {
+    startDate = `${year}-${String(month).padStart(2, '0')}-01`
+    const lastDay = new Date(Number(year), Number(month), 0).getDate()
+    endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
+  } else if (period === 'yearly' && year) {
+    startDate = `${year}-01-01`
+    endDate = `${year}-12-31`
+  } else {
+    return jsonErr(`Invalid parameters: period=${period}, date=${date}, year=${year}, month=${month}`, 400)
+  }
+
+  const from = startDate + 'T00:00:00.000Z'
+  const to   = endDate   + 'T23:59:59.999Z'
+
+  const salesList = await db.select({
+    id: sales.id,
+    status: sales.status,
+    total: sales.total,
+    discount_total: sales.discount_total,
+    subtotal: sales.subtotal,
+  }).from(sales)
+    .where(and(
+      gte(sales.created_at, from),
+      lte(sales.created_at, to),
+    ))
+
+  const completedSales = salesList.filter(s => s.status === 'completed')
+  const totalSales = completedSales.reduce((sum, s) => sum + s.total, 0)
+  const totalDiscount = completedSales.reduce((sum, s) => sum + s.discount_total, 0)
+  const transactionCount = completedSales.length
+  const avgSale = transactionCount > 0 ? totalSales / transactionCount : 0
+
+  const voidedCount = salesList.filter(s => s.status === 'voided').length
+  const refundedCount = salesList.filter(s => s.status === 'refunded').length
+  const deletedCount = salesList.filter(s => s.status === 'soft_deleted').length
+
+  let editedCount = 0
+  const editedAudits = await db.select({ entity_id: auditLogs.entity_id })
+    .from(auditLogs)
+    .where(and(
+      eq(auditLogs.entity_type, 'sale'),
+      sql`${auditLogs.action} LIKE '%edit_sale%'`,
+      gte(auditLogs.created_at, from),
+      lte(auditLogs.created_at, to),
+    ))
+    .groupBy(auditLogs.entity_id)
+  editedCount = editedAudits.length
+
+  const completedIds = completedSales.map(s => s.id)
+  let paymentBreakdown: Record<string, number> = {}
+  if (completedIds.length) {
+    const payments = await db.select().from(salePayments)
+      .where(sql`sale_id IN (${sql.join(completedIds.map(i => sql`${i}`), sql`,`)})`)
+    for (const p of payments) {
+      paymentBreakdown[p.method] = (paymentBreakdown[p.method] ?? 0) + p.amount
+    }
+  }
+
+  return jsonOk({
+    total_sales: Math.round(totalSales * 100) / 100,
+    transaction_count: transactionCount,
+    avg_sale: Math.round(avgSale * 100) / 100,
+    total_discount: Math.round(totalDiscount * 100) / 100,
+    voided_count: voidedCount,
+    refunded_count: refundedCount,
+    edited_count: editedCount,
+    deleted_count: deletedCount,
+    payment_breakdown: paymentBreakdown,
   })
 })
 
