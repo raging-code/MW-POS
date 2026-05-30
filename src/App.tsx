@@ -1554,7 +1554,7 @@ function POSPage() {
       />
 
       {sizeModal && (
-        <SizePickerModal item={sizeModal.item} allAddons={allAddons} onClose={() => setSizeModal(null)} onAdd={addToCart} />
+        <SizePickerModal item={sizeModal.item} onClose={() => setSizeModal(null)} onAdd={addToCart} />
       )}
       {showCheckout && (
         <CheckoutModal shift={shift} onClose={() => setShowCheckout(false)}
@@ -1675,16 +1675,14 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
   );
 }
 
-// ─── Size + Addon Picker Modal ────────────────────────────────
+// ─── Size Picker Modal (no add‑ons) ──────────────────────────────
 function SizePickerModal({
-  item, onClose, onAdd, allAddons,
+  item, onClose, onAdd,
 }: {
   item: MenuItem; onClose: () => void;
   onAdd: (item: MenuItem, sizeName?: string, sizePrice?: number, addons?: Addon[]) => void;
-  allAddons: Addon[];
 }) {
   const [selectedSize, setSelectedSize] = useState(item.sizes[0]);
-  const [selectedAddons, setSelectedAddons] = useState<Addon[]>([]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -1695,15 +1693,6 @@ function SizePickerModal({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [selectedSize, item.sizes]);
-
-  const toggleAddon = (addon: Addon) => {
-    setSelectedAddons(prev =>
-      prev.some(a => a.id === addon.id) ? prev.filter(a => a.id !== addon.id) : [...prev, addon]
-    );
-  };
-
-  const displayAddons = allAddons.filter(a => a.is_available);
-  const itemTotal = (selectedSize?.price ?? 0) + selectedAddons.reduce((s, a) => s + a.price, 0);
 
   return (
     <Modal open onClose={onClose} title={item.name} maxWidth="max-w-sm">
@@ -1741,49 +1730,16 @@ function SizePickerModal({
           </div>
         )}
 
-        {displayAddons.length > 0 && (
-          <div>
-            <p className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-3"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
-              Add-ons <span className="normal-case font-medium text-gray-400">(optional)</span>
-            </p>
-            <div className="flex flex-col gap-2">
-              {displayAddons.map((a: Addon) => {
-                const active = selectedAddons.some(s => s.id === a.id);
-                return (
-                  <button key={a.id} onClick={() => toggleAddon(a)}
-                    aria-pressed={active}
-                    className="flex items-center justify-between px-4 py-2.5 rounded-xl border-2 transition-all text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
-                    style={active
-                      ? { borderColor: 'var(--leaf-green)', backgroundColor: 'var(--leaf-green-lt)' }
-                      : { borderColor: '#E4E4E7', backgroundColor: '#fff' }}>
-                    <span className="flex items-center gap-2.5">
-                      <div className="w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all"
-                        style={active ? { borderColor: 'var(--leaf-green)', backgroundColor: 'var(--leaf-green)' } : { borderColor: '#D1D1D6' }}>
-                        {active && <span className="text-white text-xs font-black" style={{ lineHeight: 1 }}>✓</span>}
-                      </div>
-                      <span className={clsx('font-semibold', active ? 'text-emerald-900' : 'text-gray-700')}>{a.name}</span>
-                    </span>
-                    <span className="text-xs font-700" style={{ color: active ? 'var(--leaf-green)' : '#71717A', fontWeight: 700 }}>
-                      +{fmt(a.price)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         <div className="flex items-center justify-between py-3.5 px-4 rounded-2xl border"
           style={{ backgroundColor: 'var(--mango-yellow-xl)', borderColor: '#FDE68A' }}>
           <span className="text-sm font-600 text-amber-800">Item Total</span>
           <span className="font-900 text-2xl text-amber-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 900 }}>
-            {fmt(itemTotal)}
+            {fmt(selectedSize?.price ?? 0)}
           </span>
         </div>
 
         <Btn variant="mango" fullWidth size="lg"
-          onClick={() => onAdd(item, selectedSize?.name, selectedSize?.price, selectedAddons)}>
+          onClick={() => onAdd(item, selectedSize?.name, selectedSize?.price, [])}>
           <Plus size={16} /> Add to Order
         </Btn>
       </div>
