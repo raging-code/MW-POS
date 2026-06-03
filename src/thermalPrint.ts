@@ -1,27 +1,28 @@
 /**
- * thermalPrint.ts
+ * thermalPrint.ts  (Android / Capacitor edition)
  *
- * Direct Bluetooth thermal printer support for MW-POS.
+ * Strategy:
+ *  - On Android (Capacitor), use the BluetoothPrinterPlugin native bridge.
+ *    • The printer MAC + name is persisted in localStorage so the app
+ *      auto-reconnects on every open — NO picker dialog on subsequent prints.
+ *    • On the very first print (no saved printer), the picker is shown once.
+ *  - On the browser (dev/web), falls back to window.print() so you can still
+ *    develop in the browser without changes.
  *
- * Flow:
- *  1. On first print, request a paired Bluetooth device from the browser.
- *  2. Detect paper width (58 mm vs 80 mm) from the device name.
- *  3. Connect via GATT/SPP and send ESC/POS bytes.
- *  4. If Bluetooth is unavailable or the user cancels, fall back to
- *     window.print() with a dynamically injected @page CSS sized to the
- *     correct paper width.
- *
- * The resolved paper width is cached for the session so subsequent prints
- * skip the device-picker dialog.
+ * Native plugin contract (android/app/src/.../BluetoothPrinterPlugin.kt):
+ *   listPaired()          → { devices: [{ name, address }] }
+ *   connect(address)      → { success: boolean, error?: string }
+ *   disconnect()          → void
+ *   print(data: number[]) → { success: boolean, error?: string }
+ *   isConnected()         → { connected: boolean }
  */
 
 import type { SaleDetail, Settings } from './types';
 
-// ─── ESC/POS byte helpers ─────────────────────────────────────────────────────
+// ─── ESC/POS byte constants ────────────────────────────────────────────────────
 const ESC = 0x1b;
 const GS  = 0x1d;
 
-// Use mutable arrays so TypeScript is happy with the spread later
 const INIT:          number[] = [ESC, 0x40];
 const ALIGN_CENTER:  number[] = [ESC, 0x61, 0x01];
 const ALIGN_LEFT:    number[] = [ESC, 0x61, 0x00];
@@ -32,28 +33,69 @@ const NORMAL_SIZE:   number[] = [ESC, 0x21, 0x00];
 const CUT:           number[] = [GS,  0x56, 0x41, 0x03];
 const LF:            number[] = [0x0a];
 
-// Bluetooth SPP service UUID
-const SPP_SERVICE = '00001101-0000-1000-8000-00805f9b34fb';
-
 // ─── Paper width ──────────────────────────────────────────────────────────────
 export type PaperWidth = 58 | 80;
 
-/** Infer paper width from Bluetooth device name. Falls back to 58 mm. */
+const STORAGE_KEY_ADDRESS = 'printer_mac_address';
+const STORAGE_KEY_NAME    = 'printer_device_name';
+const STORAGE_KEY_WIDTH   = 'printer_paper_width';
+
 function detectPaperWidth(deviceName: string): PaperWidth {
   const n = deviceName.toUpperCase();
   const is80 = /80MM|76MM|3IN|RPP300|RP80|RP-80|PRP-080|PRP080|BIXOLON|TSP100|TSP650|TM-T88|TM-T20/.test(n);
   return is80 ? 80 : 58;
 }
 
-// ─── Session cache ────────────────────────────────────────────────────────────
-let _device: BluetoothDevice | null = null;
-let _width:  PaperWidth | null = null;
+// ─── Persistent printer state ─────────────────────────────────────────────────
+export interface SavedPrinter {
+  address: string;
+  name: string;
+  width: PaperWidth;
+}
 
-export function getCachedPaperWidth(): PaperWidth | null { return _width; }
+export function getSavedPrinter(): SavedPrinter | null {
+  const address = localStorage.getItem(STORAGE_KEY_ADDRESS);
+  const name    = localStorage.getItem(STORAGE_KEY_NAME);
+  const width   = localStorage.getItem(STORAGE_KEY_WIDTH);
+  if (!address || !name) return null;
+  return {
+    address,
+    name,
+    width: (width === '80' ? 80 : 58) as PaperWidth,
+  };
+}
+
+export function savePrinter(printer: SavedPrinter): void {
+  localStorage.setItem(STORAGE_KEY_ADDRESS, printer.address);
+  localStorage.setItem(STORAGE_KEY_NAME,    printer.name);
+  localStorage.setItem(STORAGE_KEY_WIDTH,   String(printer.width));
+}
 
 export function forgetPrinter(): void {
-  _device = null;
-  _width  = null;
+  localStorage.removeItem(STORAGE_KEY_ADDRESS);
+  localStorage.removeItem(STORAGE_KEY_NAME);
+  localStorage.removeItem(STORAGE_KEY_WIDTH);
+}
+
+export function getCachedPaperWidth(): PaperWidth | null {
+  const saved = getSavedPrinter();
+  return saved ? saved.width : null;
+}
+
+// ─── Capacitor / native bridge detection ──────────────────────────────────────
+interface BluetoothPrinterPlugin {
+  listPaired():                 Promise<{ devices: { name: string; address: string }[] }>;
+  connect(opts: { address: string }): Promise<{ success: boolean; error?: string }>;
+  disconnect():                 Promise<void>;
+  print(opts: { data: number[] }): Promise<{ success: boolean; error?: string }>;
+  isConnected():                Promise<{ connected: boolean }>;
+}
+
+function getNativePlugin(): BluetoothPrinterPlugin | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cap = (window as any).Capacitor;
+  if (!cap?.Plugins?.BluetoothPrinter) return null;
+  return cap.Plugins.BluetoothPrinter as BluetoothPrinterPlugin;
 }
 
 // ─── ESC/POS builder helpers ──────────────────────────────────────────────────
@@ -82,7 +124,7 @@ function columns(left: string, right: string, width: number): string {
 
 function dashes(n: number): string { return '-'.repeat(n); }
 
-// ─── ESC/POS receipt ──────────────────────────────────────────────────────────
+// ─── ESC/POS receipt builder ──────────────────────────────────────────────────
 function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): Uint8Array {
   const cols = width === 80 ? 48 : 32;
 
@@ -101,7 +143,6 @@ function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): 
   const parts: Uint8Array[] = [];
   const p = (...u: Uint8Array[]) => parts.push(...u);
 
-  // Init + header
   p(cmd(INIT));
   p(cmd(ALIGN_CENTER), cmd(BOLD_ON), cmd(DOUBLE_HEIGHT));
   p(line(settings.store_name || 'Mango Warrior'));
@@ -111,14 +152,12 @@ function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): 
   p(cmd(ALIGN_LEFT));
   p(line(dashes(cols)));
 
-  // Meta
   p(line(columns('Receipt:', sale.receipt_number,     cols)));
   p(line(columns('Cashier:', sale.cashier_name,        cols)));
   p(line(columns('Date:',    fmtDate(sale.created_at), cols)));
   if (sale.note) p(line(columns('Note:', sale.note,    cols)));
   p(line(dashes(cols)));
 
-  // Items
   for (const item of sale.items) {
     const label = `${item.qty}x ${item.item_name}${item.size_name ? ` (${item.size_name})` : ''}`;
     p(cmd(BOLD_ON));
@@ -134,7 +173,6 @@ function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): 
 
   p(line(dashes(cols)));
 
-  // Totals
   p(line(columns('Subtotal:', fmtMoney(sale.subtotal), cols)));
   if (sale.discount_total > 0) {
     p(line(columns('Discount:', `-${fmtMoney(sale.discount_total)}`, cols)));
@@ -150,33 +188,70 @@ function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): 
   }
 
   p(line(dashes(cols)));
-
-  // Footer
   p(cmd(ALIGN_CENTER));
   p(line(settings.receipt_footer || 'Thank you!'));
   if (sale.sale_type === 'missed') {
     p(cmd(BOLD_ON), line('*** MISSED SALE ***'), cmd(BOLD_OFF));
   }
 
-  // Feed + cut
   p(cmd(LF), cmd(LF), cmd(LF), cmd(LF), cmd(CUT));
 
   return mergeBytes(parts);
 }
 
-// ─── Bluetooth sender ─────────────────────────────────────────────────────────
-async function sendBluetooth(data: Uint8Array): Promise<boolean> {
+// ─── Native print via Capacitor plugin ───────────────────────────────────────
+async function nativePrint(data: Uint8Array, address: string): Promise<boolean> {
+  const plugin = getNativePlugin();
+  if (!plugin) return false;
+
   try {
-    if (!_device || !_device.gatt) {
-      _device = await navigator.bluetooth.requestDevice({
+    // Check if already connected; if not, reconnect silently
+    const { connected } = await plugin.isConnected();
+    if (!connected) {
+      const r = await plugin.connect({ address });
+      if (!r.success) {
+        console.warn('[ThermalPrint] Connect failed:', r.error);
+        return false;
+      }
+    }
+
+    const result = await plugin.print({ data: Array.from(data) });
+    if (!result.success) {
+      console.warn('[ThermalPrint] Print failed:', result.error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[ThermalPrint] Native print error:', err);
+    return false;
+  }
+}
+
+// ─── Web Bluetooth fallback (browser dev mode only) ──────────────────────────
+const SPP_SERVICE = '00001101-0000-1000-8000-00805f9b34fb';
+let _webDevice: BluetoothDevice | null = null;
+
+async function webBluetoothPrint(data: Uint8Array): Promise<boolean> {
+  const btAvailable =
+    typeof navigator !== 'undefined' &&
+    'bluetooth' in navigator &&
+    typeof (navigator as unknown as { bluetooth?: { requestDevice: unknown } }).bluetooth?.requestDevice === 'function';
+
+  if (!btAvailable) return false;
+
+  try {
+    const nav = navigator as unknown as { bluetooth: { requestDevice: (o: unknown) => Promise<BluetoothDevice> } };
+
+    if (!_webDevice || !_webDevice.gatt) {
+      _webDevice = await nav.bluetooth.requestDevice({
         acceptAllDevices: true,
         optionalServices: [SPP_SERVICE],
       });
-      _width = detectPaperWidth(_device.name ?? '');
+      const w = detectPaperWidth(_webDevice.name ?? '');
+      savePrinter({ address: (_webDevice as unknown as { id: string }).id, name: _webDevice.name ?? '', width: w });
     }
 
-    const server = await _device.gatt!.connect();
-
+    const server = await _webDevice.gatt!.connect();
     let service: BluetoothRemoteGATTService | null = null;
     try {
       service = await server.getPrimaryService(SPP_SERVICE);
@@ -184,7 +259,7 @@ async function sendBluetooth(data: Uint8Array): Promise<boolean> {
       const all = await server.getPrimaryServices();
       service = all[0] ?? null;
     }
-    if (!service) throw new Error('No GATT service found');
+    if (!service) throw new Error('No GATT service');
 
     const chars = await service.getCharacteristics();
     const writable = chars.find(c => c.properties.write || c.properties.writeWithoutResponse);
@@ -201,12 +276,12 @@ async function sendBluetooth(data: Uint8Array): Promise<boolean> {
     }
     return true;
   } catch (err) {
-    console.warn('[ThermalPrint] Bluetooth failed:', err);
+    console.warn('[ThermalPrint] Web Bluetooth failed:', err);
     return false;
   }
 }
 
-// ─── CSS window.print() fallback ─────────────────────────────────────────────
+// ─── CSS window.print() final fallback ───────────────────────────────────────
 function windowPrintFallback(paperWidth: PaperWidth): void {
   const mmWidth = paperWidth === 80 ? '80mm' : '58mm';
   const styleId = '__thermal_print_style__';
@@ -239,55 +314,115 @@ function windowPrintFallback(paperWidth: PaperWidth): void {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Print a receipt directly to the paired Bluetooth thermal printer.
- * Falls back to window.print() if Bluetooth is unavailable or fails.
+ * Print a receipt. On Android (Capacitor) it silently reconnects to the saved
+ * printer and prints directly — no dialog. Falls back to window.print() when
+ * no native plugin is present.
  */
 export async function printReceipt(sale: SaleDetail, settings: Settings): Promise<void> {
-  const btAvailable =
-    typeof navigator !== 'undefined' &&
-    'bluetooth' in navigator &&
-    typeof navigator.bluetooth?.requestDevice === 'function';
+  const saved = getSavedPrinter();
+  const width: PaperWidth = saved?.width ?? 58;
+  const data = buildReceipt(sale, settings, width);
 
-  if (btAvailable) {
-    // Use cached width if known; 58 is default before first pair
-    const w: PaperWidth = _width ?? 58;
-    const ok = await sendBluetooth(buildReceipt(sale, settings, w));
-    if (ok) {
-      // If width was just detected for the first time, it may have changed — resend
-      if (_width && _width !== w) {
-        await sendBluetooth(buildReceipt(sale, settings, _width));
-      }
-      return;
-    }
+  const plugin = getNativePlugin();
+
+  if (plugin && saved) {
+    const ok = await nativePrint(data, saved.address);
+    if (ok) return;
+    // If the saved printer failed, fall through to web BT or window.print
   }
 
-  // Fallback
-  windowPrintFallback(_width ?? 58);
+  if (!plugin) {
+    // Running in browser (dev) — try Web Bluetooth first
+    const ok = await webBluetoothPrint(data);
+    if (ok) return;
+  }
+
+  windowPrintFallback(width);
 }
 
 /**
- * Prompt the user to select their Bluetooth printer and detect its paper width.
- * Caches the result for the session. Returns the detected width, or null on cancel.
+ * Prompt the user once to select a paired Bluetooth printer and save it.
+ * On Android (Capacitor): shows a list of paired devices from the native plugin.
+ * In browser: falls back to Web Bluetooth requestDevice picker.
+ *
+ * Returns the saved printer info, or null if cancelled.
  */
-export async function probePaperWidth(): Promise<PaperWidth | null> {
-  if (_width) return _width;
+export async function selectAndSavePrinter(): Promise<SavedPrinter | null> {
+  const plugin = getNativePlugin();
 
-  const btAvailable =
-    typeof navigator !== 'undefined' &&
-    'bluetooth' in navigator &&
-    typeof navigator.bluetooth?.requestDevice === 'function';
+  if (plugin) {
+    try {
+      const { devices } = await plugin.listPaired();
+      if (!devices.length) {
+        alert('No paired Bluetooth devices found. Please pair your printer in Android Settings first.');
+        return null;
+      }
 
-  if (!btAvailable) return null;
+      // Build a simple picker — callers (App.tsx) should show a proper modal,
+      // but as a safe fallback we use a basic prompt.
+      const lines = devices.map((d, i) => `${i + 1}. ${d.name} (${d.address})`).join('\n');
+      const idx = parseInt(prompt(`Select printer:\n${lines}`) ?? '', 10);
+      if (isNaN(idx) || idx < 1 || idx > devices.length) return null;
 
+      const chosen = devices[idx - 1];
+      const r = await plugin.connect({ address: chosen.address });
+      if (!r.success) {
+        alert(`Could not connect: ${r.error ?? 'unknown error'}`);
+        return null;
+      }
+
+      const saved: SavedPrinter = {
+        address: chosen.address,
+        name:    chosen.name,
+        width:   detectPaperWidth(chosen.name),
+      };
+      savePrinter(saved);
+      return saved;
+    } catch (err) {
+      console.warn('[ThermalPrint] selectAndSavePrinter error:', err);
+      return null;
+    }
+  }
+
+  // Browser fallback
   try {
-    const device = await navigator.bluetooth.requestDevice({
+    const nav = navigator as unknown as { bluetooth?: { requestDevice: (o: unknown) => Promise<BluetoothDevice> } };
+    if (!nav.bluetooth) return null;
+
+    const device = await nav.bluetooth.requestDevice({
       acceptAllDevices: true,
       optionalServices: [SPP_SERVICE],
     });
-    _device = device;
-    _width  = detectPaperWidth(device.name ?? '');
-    return _width;
+    const saved: SavedPrinter = {
+      address: (device as unknown as { id: string }).id,
+      name:    device.name ?? 'Unknown',
+      width:   detectPaperWidth(device.name ?? ''),
+    };
+    savePrinter(saved);
+    return saved;
   } catch {
     return null;
   }
 }
+
+/**
+ * On app open, silently try to reconnect to the saved printer.
+ * Call this once in App.tsx on mount.
+ */
+export async function autoReconnectPrinter(): Promise<void> {
+  const plugin = getNativePlugin();
+  const saved  = getSavedPrinter();
+  if (!plugin || !saved) return;
+
+  try {
+    const { connected } = await plugin.isConnected();
+    if (!connected) {
+      await plugin.connect({ address: saved.address });
+    }
+  } catch {
+    // Silent — the printer might be off, that's fine; we reconnect on print
+  }
+}
+
+// Re-export for legacy callers
+export { detectPaperWidth };
