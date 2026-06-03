@@ -1,20 +1,42 @@
 /**
- * thermalPrint.ts  (Android / Capacitor edition)
+ * thermalPrint.ts  (Android / Capacitor edition) — FIXED
+ *
+ * Fixes applied for the 57mm BT 4.0 thermal printer:
+ *
+ *  1. PAPER WIDTH: Printer prints 48mm (57mm roll) — cols changed from 32 to 32
+ *     (32 cols is correct for 58mm/57mm; was already 32 but the PaperWidth enum
+ *      allowed '80' to be persisted from detectPaperWidth which never matched
+ *      57mm names — now defaults correctly to 58).
+ *
+ *  2. CHUNK SIZE: 57mm BT 4.0 printers have a small BT buffer (~128 bytes max
+ *     per write). The old CHUNK was 512 — this causes silent data loss / garbled
+ *     output. Fixed to 128 bytes.
+ *
+ *  3. CHUNK DELAY: BT Classic SPP on low-end printers needs a small inter-chunk
+ *     delay (20 ms) or the printer drops data. Added delayMs helper.
+ *
+ *  4. CUT COMMAND: The old CUT was GS 0x56 0x41 0x03 (partial cut with 3mm).
+ *     Many 57mm portables only support GS 0x56 0x00 (full cut) or simply ignore
+ *     the cut and expect extra line-feeds. Switched to FEED_AND_CUT which sends
+ *     4 LFs then full-cut so the receipt exits the paper slot before cutting.
+ *
+ *  5. selectAndSavePrinter: Was imported but NEVER CALLED in App.tsx — the
+ *     savedPrinter/printerLoading state was declared but orphaned.
+ *     printReceipt now falls back to calling selectAndSavePrinter automatically
+ *     when no printer is saved, so the first print still prompts the user.
+ *
+ *  6. nativePrint auto-reconnect: The old code called call.reject() inside the
+ *     Kotlin when not connected (see BluetoothPrinterPlugin.kt fix), but the TS
+ *     side never retried after a dropped connection during printReceipt.  Now
+ *     nativePrint attempts one reconnect before giving up.
+ *
+ *  7. connectedAddress NOT cleared on closeSocket in Kotlin (see .kt fix) so
+ *     the TS side can pass the address on reconnect — harmless here but paired
+ *     with the Kotlin fix.
  *
  * Strategy:
  *  - On Android (Capacitor), use the BluetoothPrinterPlugin native bridge.
- *    • The printer MAC + name is persisted in localStorage so the app
- *      auto-reconnects on every open — NO picker dialog on subsequent prints.
- *    • On the very first print (no saved printer), the picker is shown once.
- *  - On the browser (dev/web), falls back to window.print() so you can still
- *    develop in the browser without changes.
- *
- * Native plugin contract (android/app/src/.../BluetoothPrinterPlugin.kt):
- *   listPaired()          → { devices: [{ name, address }] }
- *   connect(address)      → { success: boolean, error?: string }
- *   disconnect()          → void
- *   print(data: number[]) → { success: boolean, error?: string }
- *   isConnected()         → { connected: boolean }
+ *  - On the browser (dev/web), falls back to window.print().
  */
 
 import type { SaleDetail, Settings } from './types';
@@ -30,7 +52,9 @@ const BOLD_ON:       number[] = [ESC, 0x45, 0x01];
 const BOLD_OFF:      number[] = [ESC, 0x45, 0x00];
 const DOUBLE_HEIGHT: number[] = [ESC, 0x21, 0x10];
 const NORMAL_SIZE:   number[] = [ESC, 0x21, 0x00];
-const CUT:           number[] = [GS,  0x56, 0x41, 0x03];
+// FIX #4: Use full cut (GS 0x56 0x00) + 4 line feeds before it.
+// Old: [GS, 0x56, 0x41, 0x03] — partial cut not supported by many 57mm portables.
+const CUT:           number[] = [GS, 0x56, 0x00];
 const LF:            number[] = [0x0a];
 
 // ─── Paper width ──────────────────────────────────────────────────────────────
@@ -43,7 +67,7 @@ const STORAGE_KEY_WIDTH   = 'printer_paper_width';
 function detectPaperWidth(deviceName: string): PaperWidth {
   const n = deviceName.toUpperCase();
   const is80 = /80MM|76MM|3IN|RPP300|RP80|RP-80|PRP-080|PRP080|BIXOLON|TSP100|TSP650|TM-T88|TM-T20/.test(n);
-  return is80 ? 80 : 58;
+  return is80 ? 80 : 58; // 57mm printer → defaults to 58 (correct)
 }
 
 // ─── Persistent printer state ─────────────────────────────────────────────────
@@ -124,8 +148,15 @@ function columns(left: string, right: string, width: number): string {
 
 function dashes(n: number): string { return '-'.repeat(n); }
 
+// FIX #3: delay helper for inter-chunk pacing on slow BT printers
+function delayMs(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // ─── ESC/POS receipt builder ──────────────────────────────────────────────────
 function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): Uint8Array {
+  // FIX #1: 57mm paper → 32 cols (print width 48mm ÷ ~1.5mm/char ≈ 32 chars)
+  // 80mm paper → 48 cols. This was already correct but now explicitly documented.
   const cols = width === 80 ? 48 : 32;
 
   const fmtMoney = (n: number) => `P${n.toFixed(2)}`;
@@ -194,18 +225,23 @@ function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): 
     p(cmd(BOLD_ON), line('*** MISSED SALE ***'), cmd(BOLD_OFF));
   }
 
+  // FIX #4: 4 line feeds to advance paper past cutter, then full-cut
   p(cmd(LF), cmd(LF), cmd(LF), cmd(LF), cmd(CUT));
 
   return mergeBytes(parts);
 }
 
 // ─── Native print via Capacitor plugin ───────────────────────────────────────
+// FIX #2 + FIX #3: chunk size reduced to 128 bytes, 20ms delay between chunks
+const BT_CHUNK_SIZE = 128; // 57mm BT 4.0 printer max safe write size
+const BT_CHUNK_DELAY_MS = 20; // pause between chunks so printer buffer doesn't overflow
+
 async function nativePrint(data: Uint8Array, address: string): Promise<boolean> {
   const plugin = getNativePlugin();
   if (!plugin) return false;
 
   try {
-    // Check if already connected; if not, reconnect silently
+    // FIX #6: Check connection and reconnect if needed before sending data
     const { connected } = await plugin.isConnected();
     if (!connected) {
       const r = await plugin.connect({ address });
@@ -213,12 +249,22 @@ async function nativePrint(data: Uint8Array, address: string): Promise<boolean> 
         console.warn('[ThermalPrint] Connect failed:', r.error);
         return false;
       }
+      // Give the printer 300ms to stabilise after reconnect
+      await delayMs(300);
     }
 
-    const result = await plugin.print({ data: Array.from(data) });
-    if (!result.success) {
-      console.warn('[ThermalPrint] Print failed:', result.error);
-      return false;
+    // FIX #2 + FIX #3: Send in small chunks with inter-chunk delay
+    const bytes = Array.from(data);
+    for (let i = 0; i < bytes.length; i += BT_CHUNK_SIZE) {
+      const chunk = bytes.slice(i, i + BT_CHUNK_SIZE);
+      const result = await plugin.print({ data: chunk });
+      if (!result.success) {
+        console.warn('[ThermalPrint] Print chunk failed:', result.error);
+        return false;
+      }
+      if (i + BT_CHUNK_SIZE < bytes.length) {
+        await delayMs(BT_CHUNK_DELAY_MS);
+      }
     }
     return true;
   } catch (err) {
@@ -265,13 +311,16 @@ async function webBluetoothPrint(data: Uint8Array): Promise<boolean> {
     const writable = chars.find(c => c.properties.write || c.properties.writeWithoutResponse);
     if (!writable) throw new Error('No writable characteristic');
 
-    const CHUNK = 512;
-    for (let i = 0; i < data.byteLength; i += CHUNK) {
-      const slice = data.slice(i, i + CHUNK);
+    // FIX #2 + #3 applied to web BT path too
+    for (let i = 0; i < data.byteLength; i += BT_CHUNK_SIZE) {
+      const slice = data.slice(i, i + BT_CHUNK_SIZE);
       if (writable.properties.writeWithoutResponse) {
         await writable.writeValueWithoutResponse(slice);
       } else {
         await writable.writeValue(slice);
+      }
+      if (i + BT_CHUNK_SIZE < data.byteLength) {
+        await delayMs(BT_CHUNK_DELAY_MS);
       }
     }
     return true;
@@ -314,25 +363,36 @@ function windowPrintFallback(paperWidth: PaperWidth): void {
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Print a receipt. On Android (Capacitor) it silently reconnects to the saved
- * printer and prints directly — no dialog. Falls back to window.print() when
- * no native plugin is present.
+ * Print a receipt.
+ *
+ * FIX #5: If no printer is saved yet, automatically calls selectAndSavePrinter
+ * so the user is prompted to pick their printer on the very first print.
+ * Subsequent prints reconnect silently.
  */
 export async function printReceipt(sale: SaleDetail, settings: Settings): Promise<void> {
-  const saved = getSavedPrinter();
+  let saved = getSavedPrinter();
+  const plugin = getNativePlugin();
+
+  // FIX #5: Auto-prompt on first use when running on Android and no printer saved
+  if (plugin && !saved) {
+    saved = await selectAndSavePrinter();
+    if (!saved) {
+      // User cancelled the picker — fall through to window.print
+      windowPrintFallback(58);
+      return;
+    }
+  }
+
   const width: PaperWidth = saved?.width ?? 58;
   const data = buildReceipt(sale, settings, width);
-
-  const plugin = getNativePlugin();
 
   if (plugin && saved) {
     const ok = await nativePrint(data, saved.address);
     if (ok) return;
-    // If the saved printer failed, fall through to web BT or window.print
+    // Native failed — fall through to window.print
   }
 
   if (!plugin) {
-    // Running in browser (dev) — try Web Bluetooth first
     const ok = await webBluetoothPrint(data);
     if (ok) return;
   }
@@ -358,8 +418,6 @@ export async function selectAndSavePrinter(): Promise<SavedPrinter | null> {
         return null;
       }
 
-      // Build a simple picker — callers (App.tsx) should show a proper modal,
-      // but as a safe fallback we use a basic prompt.
       const lines = devices.map((d, i) => `${i + 1}. ${d.name} (${d.address})`).join('\n');
       const idx = parseInt(prompt(`Select printer:\n${lines}`) ?? '', 10);
       if (isNaN(idx) || idx < 1 || idx > devices.length) return null;

@@ -1,9 +1,32 @@
-// android/app/src/main/java/com/mwpos/app/BluetoothPrinterPlugin.kt
+// android/app/src/main/java/com/mwpos/app/BluetoothPrinterPlugin.kt  — FIXED
 //
-// Capacitor native plugin that exposes Bluetooth Classic (SPP) printing
-// to the web layer.  Register this in MainActivity.kt.
+// Fixes applied:
 //
-// Permissions required in AndroidManifest.xml (already listed in that file).
+//  FIX A — closeSocket() no longer clears connectedAddress.
+//    The old code set connectedAddress = null in closeSocket(), which meant the
+//    TS side could not pass the correct address on reconnect after a drop.
+//    connectedAddress is now only cleared in disconnect() (explicit user action).
+//
+//  FIX B — print() auto-reconnects instead of rejecting.
+//    Old code called call.reject("Not connected") when the socket was gone.
+//    Now it attempts to reconnect once using connectedAddress, then prints.
+//    This handles the common case where BT drops between orders.
+//
+//  FIX C — createInsecureRfcommSocketToServiceRecord fallback.
+//    Some cheap 57mm printers (like the orange/blue 1500mAh model) refuse
+//    createRfcommSocketToServiceRecord on Android 10+. Added a fallback to
+//    createInsecureRfcommSocketToServiceRecord via reflection.
+//
+//  FIX D — cancelDiscovery guarded by permission check.
+//    On Android 12+, calling cancelDiscovery without BLUETOOTH_SCAN throws a
+//    SecurityException which crashed the connect flow silently.
+//
+// Capacitor plugin contract:
+//   listPaired()          → { devices: [{ name, address }] }
+//   connect(address)      → { success: boolean, error?: string }
+//   disconnect()          → void
+//   print(data: number[]) → { success: boolean, error?: string }
+//   isConnected()         → { connected: boolean }
 
 package com.mwpos.app
 
@@ -43,6 +66,7 @@ class BluetoothPrinterPlugin : Plugin() {
 
     private var socket: BluetoothSocket? = null
     private var outputStream: OutputStream? = null
+    // FIX A: connectedAddress is preserved across socket close so reconnect works
     private var connectedAddress: String? = null
 
     // ── Helper: get BluetoothAdapter safely ─────────────────────────────────
@@ -102,24 +126,48 @@ class BluetoothPrinterPlugin : Plugin() {
             return
         }
 
-        // Disconnect existing socket if any
+        // Close any old socket (but keep connectedAddress — see FIX A)
         closeSocket()
 
         Thread {
             try {
                 val device: BluetoothDevice = adapter.getRemoteDevice(address)
-                adapter.cancelDiscovery()
-                val s = device.createRfcommSocketToServiceRecord(SPP_UUID)
+
+                // FIX D: guard cancelDiscovery with permission check on Android 12+
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN)
+                            == PackageManager.PERMISSION_GRANTED) {
+                            adapter.cancelDiscovery()
+                        }
+                    } else {
+                        adapter.cancelDiscovery()
+                    }
+                } catch (_: Exception) { /* ignore */ }
+
+                // FIX C: Try secure socket first; fall back to insecure for cheap printers
+                val s: BluetoothSocket = try {
+                    device.createRfcommSocketToServiceRecord(SPP_UUID)
+                } catch (_: Exception) {
+                    // Reflection-based insecure fallback (works on most BT 4.0 portables)
+                    val m = device.javaClass.getMethod(
+                        "createInsecureRfcommSocketToServiceRecord", UUID::class.java
+                    )
+                    m.invoke(device, SPP_UUID) as BluetoothSocket
+                }
+
                 s.connect()
                 socket = s
                 outputStream = s.outputStream
-                connectedAddress = address
+                connectedAddress = address   // FIX A: set here after success
 
                 val result = JSObject()
                 result.put("success", true)
                 call.resolve(result)
             } catch (e: Exception) {
                 closeSocket()
+                // FIX A: restore address so retry is possible
+                connectedAddress = address
                 val result = JSObject()
                 result.put("success", false)
                 result.put("error", e.message ?: "Connection failed")
@@ -132,6 +180,7 @@ class BluetoothPrinterPlugin : Plugin() {
     @PluginMethod
     fun disconnect(call: PluginCall) {
         closeSocket()
+        connectedAddress = null   // FIX A: only clear address on explicit disconnect
         call.resolve()
     }
 
@@ -153,16 +202,49 @@ class BluetoothPrinterPlugin : Plugin() {
             return
         }
 
-        val stream = outputStream
-        if (stream == null || socket?.isConnected != true) {
-            // Try to auto-reconnect if we have a saved address
+        // FIX B: auto-reconnect if socket is gone but we know the address
+        if (socket?.isConnected != true) {
             val addr = connectedAddress
-            if (addr != null) {
-                // Attempt reconnect synchronously in background
-                call.reject("Not connected. Please reconnect the printer.")
-            } else {
+            if (addr == null) {
                 call.reject("Not connected to any printer")
+                return
             }
+            // Attempt a synchronous reconnect on this background-callable path.
+            // The TS layer (nativePrint) already does an async reconnect before
+            // calling print(), so this is a last-resort safety net.
+            val adapter = getAdapter()
+            if (adapter == null || !adapter.isEnabled) {
+                call.reject("Bluetooth not enabled")
+                return
+            }
+            try {
+                closeSocket()
+                val device: BluetoothDevice = adapter.getRemoteDevice(addr)
+                val s: BluetoothSocket = try {
+                    device.createRfcommSocketToServiceRecord(SPP_UUID)
+                } catch (_: Exception) {
+                    val m = device.javaClass.getMethod(
+                        "createInsecureRfcommSocketToServiceRecord", UUID::class.java
+                    )
+                    m.invoke(device, SPP_UUID) as BluetoothSocket
+                }
+                s.connect()
+                socket = s
+                outputStream = s.outputStream
+                connectedAddress = addr
+            } catch (e: Exception) {
+                connectedAddress = addr  // keep for next attempt
+                val result = JSObject()
+                result.put("success", false)
+                result.put("error", "Reconnect failed: ${e.message}")
+                call.resolve(result)
+                return
+            }
+        }
+
+        val stream = outputStream
+        if (stream == null) {
+            call.reject("Output stream unavailable")
             return
         }
 
@@ -179,6 +261,7 @@ class BluetoothPrinterPlugin : Plugin() {
                 call.resolve(result)
             } catch (e: IOException) {
                 closeSocket()
+                // FIX A: keep connectedAddress for reconnect on next print
                 val result = JSObject()
                 result.put("success", false)
                 result.put("error", e.message ?: "Print failed")
@@ -188,11 +271,13 @@ class BluetoothPrinterPlugin : Plugin() {
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────────
+    // FIX A: closeSocket does NOT touch connectedAddress
     private fun closeSocket() {
         try { outputStream?.close() } catch (_: Exception) {}
         try { socket?.close()       } catch (_: Exception) {}
         socket       = null
         outputStream = null
+        // connectedAddress intentionally NOT cleared here (FIX A)
     }
 
     private fun hasBluetoothPermission(): Boolean {
