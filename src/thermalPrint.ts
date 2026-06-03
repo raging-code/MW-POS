@@ -13,18 +13,26 @@
  *
  *  5. selectAndSavePrinter auto-called on first print. Correct and unchanged.
  *
- *  6. nativePrint auto-reconnect via isConnected() before chunked send. Unchanged.
- *     (The Kotlin isConnected() is now fixed to use a live probe — see .kt fix F.)
+ *  6. nativePrint auto-reconnect via isConnected() before chunked send.
+ *     isConnected() now uses a live probe on the Kotlin side (FIX F in .kt),
+ *     so it correctly detects a dropped connection instead of trusting the
+ *     stale socket.isConnected flag.
  *
- *  7. connectedAddress preserved across socket close (Kotlin fix A). Unchanged.
+ *  7. connectedAddress preserved across socket close (Kotlin FIX A). Unchanged.
  *
- *  NEW FIX 8 — REMOVED prompt() / alert() for device picker.
- *     Capacitor WebView blocks window.prompt() and window.alert() by default on
- *     Android — prompt() silently returns null, so the user could never pair a
- *     printer through the in-app flow. Replaced with a lightweight Promise-based
- *     modal system: showPrinterPickerModal() injects a self-contained HTML dialog
- *     into the DOM and resolves when the user picks a device or cancels.
- *     No external dependencies; works inside Capacitor WebView.
+ *  8. DOM-based printer picker modal replaces window.prompt() / window.alert().
+ *     Capacitor WebView blocks both silently on Android. Unchanged.
+ *
+ *  NEW FIX 9 — printReceipt() shows a visible error toast on Android when
+ *     native printing fails instead of silently falling through to window.print()
+ *     (which does nothing useful inside a Capacitor WebView). The user now sees
+ *     "Printing failed — check your Bluetooth printer" rather than nothing.
+ *
+ *  NEW FIX 10 — autoReconnectPrinter() skips the isConnected() check and always
+ *     calls connect() on startup. The old isConnected() guard was based on the
+ *     stale socket state and would often skip a needed reconnect on app resume.
+ *     Now it always attempts connect() silently on mount; the Kotlin side handles
+ *     the case where it is already connected gracefully.
  *
  * Strategy:
  *  - On Android (Capacitor), use the BluetoothPrinterPlugin native bridge.
@@ -98,11 +106,11 @@ export function getCachedPaperWidth(): PaperWidth | null {
 
 // ─── Capacitor / native bridge detection ──────────────────────────────────────
 interface BluetoothPrinterPlugin {
-  listPaired():                     Promise<{ devices: { name: string; address: string }[] }>;
+  listPaired():                       Promise<{ devices: { name: string; address: string }[] }>;
   connect(opts: { address: string }): Promise<{ success: boolean; error?: string }>;
-  disconnect():                     Promise<void>;
-  print(opts: { data: number[] }):  Promise<{ success: boolean; error?: string }>;
-  isConnected():                    Promise<{ connected: boolean }>;
+  disconnect():                       Promise<void>;
+  print(opts: { data: number[] }):    Promise<{ success: boolean; error?: string }>;
+  isConnected():                      Promise<{ connected: boolean }>;
 }
 
 function getNativePlugin(): BluetoothPrinterPlugin | null {
@@ -228,8 +236,9 @@ async function nativePrint(data: Uint8Array, address: string): Promise<boolean> 
   if (!plugin) return false;
 
   try {
-    // isConnected() in Kotlin now uses a live probe (FIX F in .kt), so this
-    // check correctly detects a dropped connection.
+    // isConnected() now uses a live probe on the Kotlin side (FIX F),
+    // so this correctly detects a dropped connection even if the socket
+    // object still exists.
     const { connected } = await plugin.isConnected();
     if (!connected) {
       const r = await plugin.connect({ address });
@@ -241,7 +250,8 @@ async function nativePrint(data: Uint8Array, address: string): Promise<boolean> 
       await delayMs(300);
     }
 
-    // Send in small chunks with inter-chunk delay
+    // Send in small chunks with inter-chunk delay so the printer's small
+    // receive buffer (common on cheap BT 4.0 57mm models) does not overflow.
     const bytes = Array.from(data);
     for (let i = 0; i < bytes.length; i += BT_CHUNK_SIZE) {
       const chunk = bytes.slice(i, i + BT_CHUNK_SIZE);
@@ -362,12 +372,12 @@ function showPrinterPickerModal(devices: PickerDevice[]): Promise<PickerDevice |
   });
 }
 
-// ── Simple error toast (replaces alert() for error messages) ─────────────────
+// ── Simple error toast (replaces alert() — works inside Capacitor WebView) ───
 function showPrinterError(message: string): void {
   const toast = document.createElement('div');
   toast.style.cssText = [
     'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);',
-    'z-index:99999;background:#1f2937;color:#fff;',
+    'z-index:99999;background:#dc2626;color:#fff;',
     'padding:12px 20px;border-radius:12px;font-size:13px;font-weight:500;',
     'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;',
     'box-shadow:0 8px 24px rgba(0,0,0,0.25);max-width:calc(100vw - 32px);',
@@ -375,7 +385,7 @@ function showPrinterError(message: string): void {
   ].join('');
   toast.textContent = message;
   document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  setTimeout(() => toast.remove(), 5000);
 }
 
 function escapeHtml(s: string): string {
@@ -477,6 +487,10 @@ function windowPrintFallback(paperWidth: PaperWidth): void {
 /**
  * Print a receipt.
  * If no printer is saved yet, automatically prompts the user to pick one.
+ *
+ * FIX 9: On Android, if native printing fails, shows a visible error toast
+ * instead of silently falling through to window.print() (which does nothing
+ * inside a Capacitor WebView and leaves the user with no feedback).
  */
 export async function printReceipt(sale: SaleDetail, settings: Settings): Promise<void> {
   let saved = getSavedPrinter();
@@ -486,7 +500,7 @@ export async function printReceipt(sale: SaleDetail, settings: Settings): Promis
   if (plugin && !saved) {
     saved = await selectAndSavePrinter();
     if (!saved) {
-      windowPrintFallback(58);
+      // User cancelled the picker — nothing to do
       return;
     }
   }
@@ -497,9 +511,14 @@ export async function printReceipt(sale: SaleDetail, settings: Settings): Promis
   if (plugin && saved) {
     const ok = await nativePrint(data, saved.address);
     if (ok) return;
-    // Native failed — fall through to window.print
+    // FIX 9: Show a user-visible error instead of a silent window.print() fallback
+    showPrinterError(
+      'Printing failed.\nMake sure your Bluetooth printer is on and in range, then try again.'
+    );
+    return;
   }
 
+  // Browser (dev) path: try Web Bluetooth, then CSS print
   if (!plugin) {
     const ok = await webBluetoothPrint(data);
     if (ok) return;
@@ -577,6 +596,12 @@ export async function selectAndSavePrinter(): Promise<SavedPrinter | null> {
 /**
  * On app open, silently try to reconnect to the saved printer.
  * Call this once in App.tsx on mount.
+ *
+ * FIX 10: Always calls connect() rather than checking isConnected() first.
+ * The old guard checked socket.isConnected which was always stale on app
+ * resume, frequently skipping the reconnect. The Kotlin connect() handles
+ * an already-connected socket safely (closes and reopens), so calling it
+ * unconditionally on startup is safe and reliable.
  */
 export async function autoReconnectPrinter(): Promise<void> {
   const plugin = getNativePlugin();
@@ -584,12 +609,9 @@ export async function autoReconnectPrinter(): Promise<void> {
   if (!plugin || !saved) return;
 
   try {
-    const { connected } = await plugin.isConnected();
-    if (!connected) {
-      await plugin.connect({ address: saved.address });
-    }
+    await plugin.connect({ address: saved.address });
   } catch {
-    // Silent — printer might be off; reconnect happens on next print
+    // Silent — printer might be off; reconnect happens on next print attempt
   }
 }
 

@@ -1,25 +1,33 @@
-// android/app/src/main/java/com/mwpos/app/BluetoothPrinterPlugin.kt  — FIXED
+// android/app/src/main/java/com/mwpos/app/BluetoothPrinterPlugin.kt
 //
 // Fixes applied:
 //
 //  FIX A — closeSocket() no longer clears connectedAddress.
-//    The old code set connectedAddress = null in closeSocket(), which meant the
-//    TS side could not pass the correct address on reconnect after a drop.
-//    connectedAddress is now only cleared in disconnect() (explicit user action).
+//    connectedAddress is only cleared in disconnect() (explicit user action).
 //
-//  FIX B — print() auto-reconnects instead of rejecting.
-//    Old code called call.reject("Not connected") when the socket was gone.
-//    Now it attempts to reconnect once using connectedAddress, then prints.
-//    This handles the common case where BT drops between orders.
+//  FIX B — print() auto-reconnects instead of rejecting when socket is gone.
 //
-//  FIX C — createInsecureRfcommSocketToServiceRecord fallback.
-//    Some cheap 57mm printers (like the orange/blue 1500mAh model) refuse
-//    createRfcommSocketToServiceRecord on Android 10+. Added a fallback to
-//    createInsecureRfcommSocketToServiceRecord via reflection.
+//  FIX C — createInsecureRfcommSocketToServiceRecord fallback for cheap BT 4.0
+//    printers (like the orange/blue 1500mAh model) that refuse the secure socket
+//    on Android 10+.
 //
-//  FIX D — cancelDiscovery guarded by permission check.
-//    On Android 12+, calling cancelDiscovery without BLUETOOTH_SCAN throws a
-//    SecurityException which crashed the connect flow silently.
+//  FIX D — cancelDiscovery guarded by BLUETOOTH_SCAN permission on Android 12+.
+//
+//  FIX E — print() reconnect and actual write are BOTH moved inside Thread{}.
+//    Previously the fallback reconnect block ran synchronously on the Capacitor
+//    main (UI) thread before Thread{} started. BluetoothSocket.connect() is a
+//    blocking network call; doing it on the main thread causes
+//    NetworkOnMainThreadException on Android 11+ (strict mode) and freezes the
+//    UI on older versions. The entire print() body — reconnect + write — now
+//    runs inside a single background Thread so the UI is never blocked.
+//
+//  FIX F — isConnected() uses a live probe instead of socket.isConnected.
+//    BluetoothSocket.isConnected only reflects state at socket-creation time.
+//    It stays true even after the remote device goes out of range or sleeps.
+//    We now probe liveness by attempting to write a zero-length byte array;
+//    an IOException means the connection is actually dead, so we close the
+//    socket and return connected=false. The probe itself is fire-and-forget
+//    on a background thread so the plugin method returns quickly.
 //
 // Capacitor plugin contract:
 //   listPaired()          → { devices: [{ name, address }] }
@@ -75,6 +83,19 @@ class BluetoothPrinterPlugin : Plugin() {
         return bm?.adapter
     }
 
+    // ── Helper: open an RFCOMM socket, trying secure then insecure (FIX C) ──
+    private fun openSocket(device: BluetoothDevice): BluetoothSocket {
+        return try {
+            device.createRfcommSocketToServiceRecord(SPP_UUID)
+        } catch (_: Exception) {
+            // Reflection-based insecure fallback — works on most BT 4.0 portable printers
+            val m = device.javaClass.getMethod(
+                "createInsecureRfcommSocketToServiceRecord", UUID::class.java
+            )
+            m.invoke(device, SPP_UUID) as BluetoothSocket
+        }
+    }
+
     // ── listPaired ───────────────────────────────────────────────────────────
     @PluginMethod
     fun listPaired(call: PluginCall) {
@@ -126,18 +147,20 @@ class BluetoothPrinterPlugin : Plugin() {
             return
         }
 
-        // Close any old socket (but keep connectedAddress — see FIX A)
+        // Close any old socket (connectedAddress intentionally kept — FIX A)
         closeSocket()
 
         Thread {
             try {
                 val device: BluetoothDevice = adapter.getRemoteDevice(address)
 
-                // FIX D: guard cancelDiscovery with permission check on Android 12+
+                // FIX D: guard cancelDiscovery with BLUETOOTH_SCAN on Android 12+
                 try {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN)
-                            == PackageManager.PERMISSION_GRANTED) {
+                        if (ActivityCompat.checkSelfPermission(
+                                context, Manifest.permission.BLUETOOTH_SCAN
+                            ) == PackageManager.PERMISSION_GRANTED
+                        ) {
                             adapter.cancelDiscovery()
                         }
                     } else {
@@ -145,29 +168,18 @@ class BluetoothPrinterPlugin : Plugin() {
                     }
                 } catch (_: Exception) { /* ignore */ }
 
-                // FIX C: Try secure socket first; fall back to insecure for cheap printers
-                val s: BluetoothSocket = try {
-                    device.createRfcommSocketToServiceRecord(SPP_UUID)
-                } catch (_: Exception) {
-                    // Reflection-based insecure fallback (works on most BT 4.0 portables)
-                    val m = device.javaClass.getMethod(
-                        "createInsecureRfcommSocketToServiceRecord", UUID::class.java
-                    )
-                    m.invoke(device, SPP_UUID) as BluetoothSocket
-                }
-
+                val s = openSocket(device) // FIX C
                 s.connect()
                 socket = s
                 outputStream = s.outputStream
-                connectedAddress = address   // FIX A: set here after success
+                connectedAddress = address // FIX A: set after success
 
                 val result = JSObject()
                 result.put("success", true)
                 call.resolve(result)
             } catch (e: Exception) {
                 closeSocket()
-                // FIX A: restore address so retry is possible
-                connectedAddress = address
+                connectedAddress = address // FIX A: keep for retry
                 val result = JSObject()
                 result.put("success", false)
                 result.put("error", e.message ?: "Connection failed")
@@ -180,20 +192,52 @@ class BluetoothPrinterPlugin : Plugin() {
     @PluginMethod
     fun disconnect(call: PluginCall) {
         closeSocket()
-        connectedAddress = null   // FIX A: only clear address on explicit disconnect
+        connectedAddress = null // FIX A: only clear on explicit user disconnect
         call.resolve()
     }
 
-    // ── isConnected ──────────────────────────────────────────────────────────
+    // ── isConnected — FIX F: live probe instead of socket.isConnected ────────
+    //
+    // BluetoothSocket.isConnected is set once at connect time and never updated;
+    // it will return true even if the printer has gone to sleep or walked away.
+    // We probe liveness by writing zero bytes: a broken pipe will throw IOException
+    // immediately, proving the link is dead without sending any visible data.
+    // The probe runs on a background thread; the plugin returns quickly.
     @PluginMethod
     fun isConnected(call: PluginCall) {
-        val connected = socket?.isConnected == true
-        val result = JSObject()
-        result.put("connected", connected)
-        call.resolve(result)
+        val s = socket
+        val stream = outputStream
+
+        if (s == null || stream == null) {
+            val result = JSObject()
+            result.put("connected", false)
+            call.resolve(result)
+            return
+        }
+
+        // Run the live probe off the main thread (FIX E principle applied here too)
+        Thread {
+            val alive = try {
+                stream.write(ByteArray(0)) // zero-byte write; throws if link is dead
+                stream.flush()
+                true
+            } catch (_: IOException) {
+                // Link is dead — clean up so next print triggers a fresh connect
+                closeSocket()
+                false
+            }
+            val result = JSObject()
+            result.put("connected", alive)
+            call.resolve(result)
+        }.start()
     }
 
-    // ── print ────────────────────────────────────────────────────────────────
+    // ── print — FIX E: entire body (reconnect + write) runs in Thread{} ─────
+    //
+    // Previously the fallback reconnect block ran on the calling (UI) thread
+    // before Thread{} started. BluetoothSocket.connect() blocks the thread for
+    // up to several seconds and causes NetworkOnMainThreadException on Android
+    // 11+ strict mode. Moving everything into one Thread{} fixes both issues.
     @PluginMethod
     fun print(call: PluginCall) {
         val dataArray = call.getArray("data")
@@ -202,53 +246,45 @@ class BluetoothPrinterPlugin : Plugin() {
             return
         }
 
-        // FIX B: auto-reconnect if socket is gone but we know the address
-        if (socket?.isConnected != true) {
-            val addr = connectedAddress
-            if (addr == null) {
-                call.reject("Not connected to any printer")
-                return
-            }
-            // Attempt a synchronous reconnect on this background-callable path.
-            // The TS layer (nativePrint) already does an async reconnect before
-            // calling print(), so this is a last-resort safety net.
-            val adapter = getAdapter()
-            if (adapter == null || !adapter.isEnabled) {
-                call.reject("Bluetooth not enabled")
-                return
-            }
-            try {
-                closeSocket()
-                val device: BluetoothDevice = adapter.getRemoteDevice(addr)
-                val s: BluetoothSocket = try {
-                    device.createRfcommSocketToServiceRecord(SPP_UUID)
-                } catch (_: Exception) {
-                    val m = device.javaClass.getMethod(
-                        "createInsecureRfcommSocketToServiceRecord", UUID::class.java
-                    )
-                    m.invoke(device, SPP_UUID) as BluetoothSocket
-                }
-                s.connect()
-                socket = s
-                outputStream = s.outputStream
-                connectedAddress = addr
-            } catch (e: Exception) {
-                connectedAddress = addr  // keep for next attempt
-                val result = JSObject()
-                result.put("success", false)
-                result.put("error", "Reconnect failed: ${e.message}")
-                call.resolve(result)
-                return
-            }
-        }
-
-        val stream = outputStream
-        if (stream == null) {
-            call.reject("Output stream unavailable")
-            return
-        }
+        val addr = connectedAddress
 
         Thread {
+            // ── Step 1: reconnect if socket is gone (FIX B + FIX E) ──────────
+            if (socket?.isConnected != true) {
+                if (addr == null) {
+                    call.reject("Not connected to any printer")
+                    return@Thread
+                }
+                val adapter = getAdapter()
+                if (adapter == null || !adapter.isEnabled) {
+                    call.reject("Bluetooth not enabled")
+                    return@Thread
+                }
+                try {
+                    closeSocket()
+                    val device: BluetoothDevice = adapter.getRemoteDevice(addr)
+                    val s = openSocket(device) // FIX C
+                    s.connect()
+                    socket = s
+                    outputStream = s.outputStream
+                    connectedAddress = addr
+                } catch (e: Exception) {
+                    connectedAddress = addr // keep for next attempt
+                    val result = JSObject()
+                    result.put("success", false)
+                    result.put("error", "Reconnect failed: ${e.message}")
+                    call.resolve(result)
+                    return@Thread
+                }
+            }
+
+            // ── Step 2: write the bytes ───────────────────────────────────────
+            val stream = outputStream
+            if (stream == null) {
+                call.reject("Output stream unavailable")
+                return@Thread
+            }
+
             try {
                 val bytes = ByteArray(dataArray.length()) { i ->
                     dataArray.getInt(i).toByte()
@@ -261,7 +297,7 @@ class BluetoothPrinterPlugin : Plugin() {
                 call.resolve(result)
             } catch (e: IOException) {
                 closeSocket()
-                // FIX A: keep connectedAddress for reconnect on next print
+                // FIX A: keep connectedAddress for reconnect on next print attempt
                 val result = JSObject()
                 result.put("success", false)
                 result.put("error", e.message ?: "Print failed")
@@ -271,6 +307,7 @@ class BluetoothPrinterPlugin : Plugin() {
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────────
+
     // FIX A: closeSocket does NOT touch connectedAddress
     private fun closeSocket() {
         try { outputStream?.close() } catch (_: Exception) {}
@@ -282,20 +319,26 @@ class BluetoothPrinterPlugin : Plugin() {
 
     private fun hasBluetoothPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) ==
-                PackageManager.PERMISSION_GRANTED
+            ActivityCompat.checkSelfPermission(
+                context, Manifest.permission.BLUETOOTH_CONNECT
+            ) == PackageManager.PERMISSION_GRANTED
         } else {
-            ActivityCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH) ==
-                PackageManager.PERMISSION_GRANTED
+            ActivityCompat.checkSelfPermission(
+                context, Manifest.permission.BLUETOOTH
+            ) == PackageManager.PERMISSION_GRANTED
         }
     }
 
     private fun requestBluetoothPermissionsForCall(call: PluginCall, callbackName: String) {
         saveCall(call)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            requestPermissionForAliases(arrayOf("bluetoothConnect", "bluetoothScan"), call, callbackName)
+            requestPermissionForAliases(
+                arrayOf("bluetoothConnect", "bluetoothScan"), call, callbackName
+            )
         } else {
-            requestPermissionForAliases(arrayOf("bluetooth", "bluetoothAdmin"), call, callbackName)
+            requestPermissionForAliases(
+                arrayOf("bluetooth", "bluetoothAdmin"), call, callbackName
+            )
         }
     }
 
