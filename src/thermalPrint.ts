@@ -1,42 +1,34 @@
 /**
- * thermalPrint.ts  (Android / Capacitor edition) — FIXED
+ * thermalPrint.ts  (Android / Capacitor edition)
  *
- * Fixes applied for the 57mm BT 4.0 thermal printer:
+ * Fixes in this file:
  *
- *  1. PAPER WIDTH: Printer prints 48mm (57mm roll) — cols changed from 32 to 32
- *     (32 cols is correct for 58mm/57mm; was already 32 but the PaperWidth enum
- *      allowed '80' to be persisted from detectPaperWidth which never matched
- *      57mm names — now defaults correctly to 58).
+ *  1. PAPER WIDTH: 57mm roll → 32 cols. Correct and unchanged.
  *
- *  2. CHUNK SIZE: 57mm BT 4.0 printers have a small BT buffer (~128 bytes max
- *     per write). The old CHUNK was 512 — this causes silent data loss / garbled
- *     output. Fixed to 128 bytes.
+ *  2. CHUNK SIZE: 128 bytes per write. Correct and unchanged.
  *
- *  3. CHUNK DELAY: BT Classic SPP on low-end printers needs a small inter-chunk
- *     delay (20 ms) or the printer drops data. Added delayMs helper.
+ *  3. CHUNK DELAY: 20ms between chunks. Correct and unchanged.
  *
- *  4. CUT COMMAND: The old CUT was GS 0x56 0x41 0x03 (partial cut with 3mm).
- *     Many 57mm portables only support GS 0x56 0x00 (full cut) or simply ignore
- *     the cut and expect extra line-feeds. Switched to FEED_AND_CUT which sends
- *     4 LFs then full-cut so the receipt exits the paper slot before cutting.
+ *  4. CUT COMMAND: GS 0x56 0x00 (full cut) + 4 LFs. Correct and unchanged.
  *
- *  5. selectAndSavePrinter: Was imported but NEVER CALLED in App.tsx — the
- *     savedPrinter/printerLoading state was declared but orphaned.
- *     printReceipt now falls back to calling selectAndSavePrinter automatically
- *     when no printer is saved, so the first print still prompts the user.
+ *  5. selectAndSavePrinter auto-called on first print. Correct and unchanged.
  *
- *  6. nativePrint auto-reconnect: The old code called call.reject() inside the
- *     Kotlin when not connected (see BluetoothPrinterPlugin.kt fix), but the TS
- *     side never retried after a dropped connection during printReceipt.  Now
- *     nativePrint attempts one reconnect before giving up.
+ *  6. nativePrint auto-reconnect via isConnected() before chunked send. Unchanged.
+ *     (The Kotlin isConnected() is now fixed to use a live probe — see .kt fix F.)
  *
- *  7. connectedAddress NOT cleared on closeSocket in Kotlin (see .kt fix) so
- *     the TS side can pass the address on reconnect — harmless here but paired
- *     with the Kotlin fix.
+ *  7. connectedAddress preserved across socket close (Kotlin fix A). Unchanged.
+ *
+ *  NEW FIX 8 — REMOVED prompt() / alert() for device picker.
+ *     Capacitor WebView blocks window.prompt() and window.alert() by default on
+ *     Android — prompt() silently returns null, so the user could never pair a
+ *     printer through the in-app flow. Replaced with a lightweight Promise-based
+ *     modal system: showPrinterPickerModal() injects a self-contained HTML dialog
+ *     into the DOM and resolves when the user picks a device or cancels.
+ *     No external dependencies; works inside Capacitor WebView.
  *
  * Strategy:
  *  - On Android (Capacitor), use the BluetoothPrinterPlugin native bridge.
- *  - On the browser (dev/web), falls back to window.print().
+ *  - On the browser (dev/web), falls back to Web Bluetooth → window.print().
  */
 
 import type { SaleDetail, Settings } from './types';
@@ -52,9 +44,7 @@ const BOLD_ON:       number[] = [ESC, 0x45, 0x01];
 const BOLD_OFF:      number[] = [ESC, 0x45, 0x00];
 const DOUBLE_HEIGHT: number[] = [ESC, 0x21, 0x10];
 const NORMAL_SIZE:   number[] = [ESC, 0x21, 0x00];
-// FIX #4: Use full cut (GS 0x56 0x00) + 4 line feeds before it.
-// Old: [GS, 0x56, 0x41, 0x03] — partial cut not supported by many 57mm portables.
-const CUT:           number[] = [GS, 0x56, 0x00];
+const CUT:           number[] = [GS, 0x56, 0x00];   // full cut
 const LF:            number[] = [0x0a];
 
 // ─── Paper width ──────────────────────────────────────────────────────────────
@@ -67,7 +57,7 @@ const STORAGE_KEY_WIDTH   = 'printer_paper_width';
 function detectPaperWidth(deviceName: string): PaperWidth {
   const n = deviceName.toUpperCase();
   const is80 = /80MM|76MM|3IN|RPP300|RP80|RP-80|PRP-080|PRP080|BIXOLON|TSP100|TSP650|TM-T88|TM-T20/.test(n);
-  return is80 ? 80 : 58; // 57mm printer → defaults to 58 (correct)
+  return is80 ? 80 : 58;
 }
 
 // ─── Persistent printer state ─────────────────────────────────────────────────
@@ -108,11 +98,11 @@ export function getCachedPaperWidth(): PaperWidth | null {
 
 // ─── Capacitor / native bridge detection ──────────────────────────────────────
 interface BluetoothPrinterPlugin {
-  listPaired():                 Promise<{ devices: { name: string; address: string }[] }>;
+  listPaired():                     Promise<{ devices: { name: string; address: string }[] }>;
   connect(opts: { address: string }): Promise<{ success: boolean; error?: string }>;
-  disconnect():                 Promise<void>;
-  print(opts: { data: number[] }): Promise<{ success: boolean; error?: string }>;
-  isConnected():                Promise<{ connected: boolean }>;
+  disconnect():                     Promise<void>;
+  print(opts: { data: number[] }):  Promise<{ success: boolean; error?: string }>;
+  isConnected():                    Promise<{ connected: boolean }>;
 }
 
 function getNativePlugin(): BluetoothPrinterPlugin | null {
@@ -148,15 +138,12 @@ function columns(left: string, right: string, width: number): string {
 
 function dashes(n: number): string { return '-'.repeat(n); }
 
-// FIX #3: delay helper for inter-chunk pacing on slow BT printers
 function delayMs(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // ─── ESC/POS receipt builder ──────────────────────────────────────────────────
 function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): Uint8Array {
-  // FIX #1: 57mm paper → 32 cols (print width 48mm ÷ ~1.5mm/char ≈ 32 chars)
-  // 80mm paper → 48 cols. This was already correct but now explicitly documented.
   const cols = width === 80 ? 48 : 32;
 
   const fmtMoney = (n: number) => `P${n.toFixed(2)}`;
@@ -219,29 +206,30 @@ function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): 
   }
 
   p(line(dashes(cols)));
+
   p(cmd(ALIGN_CENTER));
   p(line(settings.receipt_footer || 'Thank you!'));
   if (sale.sale_type === 'missed') {
     p(cmd(BOLD_ON), line('*** MISSED SALE ***'), cmd(BOLD_OFF));
   }
 
-  // FIX #4: 4 line feeds to advance paper past cutter, then full-cut
+  // 4 line feeds to advance paper past cutter, then full-cut
   p(cmd(LF), cmd(LF), cmd(LF), cmd(LF), cmd(CUT));
 
   return mergeBytes(parts);
 }
 
 // ─── Native print via Capacitor plugin ───────────────────────────────────────
-// FIX #2 + FIX #3: chunk size reduced to 128 bytes, 20ms delay between chunks
-const BT_CHUNK_SIZE = 128; // 57mm BT 4.0 printer max safe write size
-const BT_CHUNK_DELAY_MS = 20; // pause between chunks so printer buffer doesn't overflow
+const BT_CHUNK_SIZE     = 128; // 57mm BT 4.0 printer max safe write size
+const BT_CHUNK_DELAY_MS = 20;  // pause between chunks so printer buffer doesn't overflow
 
 async function nativePrint(data: Uint8Array, address: string): Promise<boolean> {
   const plugin = getNativePlugin();
   if (!plugin) return false;
 
   try {
-    // FIX #6: Check connection and reconnect if needed before sending data
+    // isConnected() in Kotlin now uses a live probe (FIX F in .kt), so this
+    // check correctly detects a dropped connection.
     const { connected } = await plugin.isConnected();
     if (!connected) {
       const r = await plugin.connect({ address });
@@ -253,7 +241,7 @@ async function nativePrint(data: Uint8Array, address: string): Promise<boolean> 
       await delayMs(300);
     }
 
-    // FIX #2 + FIX #3: Send in small chunks with inter-chunk delay
+    // Send in small chunks with inter-chunk delay
     const bytes = Array.from(data);
     for (let i = 0; i < bytes.length; i += BT_CHUNK_SIZE) {
       const chunk = bytes.slice(i, i + BT_CHUNK_SIZE);
@@ -271,6 +259,131 @@ async function nativePrint(data: Uint8Array, address: string): Promise<boolean> 
     console.warn('[ThermalPrint] Native print error:', err);
     return false;
   }
+}
+
+// ─── FIX 8: DOM-based printer picker modal (replaces prompt() / alert()) ─────
+//
+// Capacitor's WebView does not forward window.prompt() or window.alert() to the
+// Activity's WebChromeClient by default, so both calls silently return null/void.
+// This function creates a real DOM overlay and resolves a Promise when the user
+// picks a device or taps Cancel — no external libraries required.
+
+interface PickerDevice { name: string; address: string; }
+
+function showPrinterPickerModal(devices: PickerDevice[]): Promise<PickerDevice | null> {
+  return new Promise(resolve => {
+    // ── Overlay backdrop ──────────────────────────────────────────────────
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = [
+      'position:fixed;inset:0;z-index:99999;',
+      'background:rgba(0,0,0,0.45);backdrop-filter:blur(4px);',
+      'display:flex;align-items:center;justify-content:center;padding:16px;',
+    ].join('');
+
+    // ── Card ──────────────────────────────────────────────────────────────
+    const card = document.createElement('div');
+    card.style.cssText = [
+      'background:#fff;border-radius:20px;width:100%;max-width:360px;',
+      'box-shadow:0 20px 60px rgba(0,0,0,0.25);overflow:hidden;',
+      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;',
+    ].join('');
+
+    // ── Header ────────────────────────────────────────────────────────────
+    const header = document.createElement('div');
+    header.style.cssText = 'padding:18px 20px 14px;border-bottom:1px solid #f0f0f0;';
+    header.innerHTML = [
+      '<p style="margin:0;font-size:16px;font-weight:700;color:#111;">',
+      '🖨️ Select Bluetooth Printer</p>',
+      '<p style="margin:4px 0 0;font-size:12px;color:#888;">',
+      'Choose from your paired devices</p>',
+    ].join('');
+
+    // ── Device list ───────────────────────────────────────────────────────
+    const list = document.createElement('div');
+    list.style.cssText = 'max-height:280px;overflow-y:auto;padding:8px 0;';
+
+    devices.forEach(dev => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.style.cssText = [
+        'display:flex;align-items:center;gap:12px;width:100%;',
+        'padding:12px 20px;border:none;background:transparent;cursor:pointer;',
+        'text-align:left;transition:background 0.15s;',
+      ].join('');
+      row.onmouseenter = () => { row.style.background = '#fafafa'; };
+      row.onmouseleave = () => { row.style.background = 'transparent'; };
+
+      row.innerHTML = [
+        '<div style="width:36px;height:36px;border-radius:50%;background:#f0fdf4;',
+        'border:1px solid #bbf7d0;display:flex;align-items:center;justify-content:center;',
+        'font-size:18px;flex-shrink:0;">🖨️</div>',
+        '<div style="flex:1;min-width:0;">',
+        `<p style="margin:0;font-size:13px;font-weight:600;color:#111;`,
+        `white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(dev.name)}</p>`,
+        `<p style="margin:2px 0 0;font-size:11px;color:#aaa;font-family:monospace;">${escapeHtml(dev.address)}</p>`,
+        '</div>',
+      ].join('');
+
+      row.addEventListener('click', () => { cleanup(); resolve(dev); });
+      list.appendChild(row);
+    });
+
+    // ── Cancel button ─────────────────────────────────────────────────────
+    const footer = document.createElement('div');
+    footer.style.cssText = 'padding:12px 20px 18px;border-top:1px solid #f0f0f0;';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.style.cssText = [
+      'width:100%;padding:11px;border-radius:12px;border:1px solid #e5e7eb;',
+      'background:#fff;font-size:14px;font-weight:600;color:#374151;cursor:pointer;',
+      'transition:background 0.15s;',
+    ].join('');
+    cancelBtn.onmouseenter = () => { cancelBtn.style.background = '#f9fafb'; };
+    cancelBtn.onmouseleave = () => { cancelBtn.style.background = '#fff'; };
+    cancelBtn.addEventListener('click', () => { cleanup(); resolve(null); });
+
+    footer.appendChild(cancelBtn);
+
+    // ── Assemble ──────────────────────────────────────────────────────────
+    card.appendChild(header);
+    card.appendChild(list);
+    card.appendChild(footer);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+
+    // Close on backdrop click
+    backdrop.addEventListener('click', e => {
+      if (e.target === backdrop) { cleanup(); resolve(null); }
+    });
+
+    function cleanup() { backdrop.remove(); }
+  });
+}
+
+// ── Simple error toast (replaces alert() for error messages) ─────────────────
+function showPrinterError(message: string): void {
+  const toast = document.createElement('div');
+  toast.style.cssText = [
+    'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);',
+    'z-index:99999;background:#1f2937;color:#fff;',
+    'padding:12px 20px;border-radius:12px;font-size:13px;font-weight:500;',
+    'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;',
+    'box-shadow:0 8px 24px rgba(0,0,0,0.25);max-width:calc(100vw - 32px);',
+    'text-align:center;white-space:pre-wrap;',
+  ].join('');
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 // ─── Web Bluetooth fallback (browser dev mode only) ──────────────────────────
@@ -311,7 +424,6 @@ async function webBluetoothPrint(data: Uint8Array): Promise<boolean> {
     const writable = chars.find(c => c.properties.write || c.properties.writeWithoutResponse);
     if (!writable) throw new Error('No writable characteristic');
 
-    // FIX #2 + #3 applied to web BT path too
     for (let i = 0; i < data.byteLength; i += BT_CHUNK_SIZE) {
       const slice = data.slice(i, i + BT_CHUNK_SIZE);
       if (writable.properties.writeWithoutResponse) {
@@ -364,20 +476,16 @@ function windowPrintFallback(paperWidth: PaperWidth): void {
 
 /**
  * Print a receipt.
- *
- * FIX #5: If no printer is saved yet, automatically calls selectAndSavePrinter
- * so the user is prompted to pick their printer on the very first print.
- * Subsequent prints reconnect silently.
+ * If no printer is saved yet, automatically prompts the user to pick one.
  */
 export async function printReceipt(sale: SaleDetail, settings: Settings): Promise<void> {
   let saved = getSavedPrinter();
   const plugin = getNativePlugin();
 
-  // FIX #5: Auto-prompt on first use when running on Android and no printer saved
+  // Auto-prompt on first use when running on Android and no printer saved
   if (plugin && !saved) {
     saved = await selectAndSavePrinter();
     if (!saved) {
-      // User cancelled the picker — fall through to window.print
       windowPrintFallback(58);
       return;
     }
@@ -401,9 +509,10 @@ export async function printReceipt(sale: SaleDetail, settings: Settings): Promis
 }
 
 /**
- * Prompt the user once to select a paired Bluetooth printer and save it.
- * On Android (Capacitor): shows a list of paired devices from the native plugin.
- * In browser: falls back to Web Bluetooth requestDevice picker.
+ * Prompt the user to select a paired Bluetooth printer and save it.
+ *
+ * FIX 8: Uses a DOM-based modal instead of window.prompt() / window.alert(),
+ * both of which are silently blocked in Capacitor's Android WebView.
  *
  * Returns the saved printer info, or null if cancelled.
  */
@@ -413,19 +522,21 @@ export async function selectAndSavePrinter(): Promise<SavedPrinter | null> {
   if (plugin) {
     try {
       const { devices } = await plugin.listPaired();
+
       if (!devices.length) {
-        alert('No paired Bluetooth devices found. Please pair your printer in Android Settings first.');
+        showPrinterError(
+          'No paired Bluetooth devices found.\nPlease pair your printer in Android Settings first.'
+        );
         return null;
       }
 
-      const lines = devices.map((d, i) => `${i + 1}. ${d.name} (${d.address})`).join('\n');
-      const idx = parseInt(prompt(`Select printer:\n${lines}`) ?? '', 10);
-      if (isNaN(idx) || idx < 1 || idx > devices.length) return null;
+      // FIX 8: DOM modal instead of prompt()
+      const chosen = await showPrinterPickerModal(devices);
+      if (!chosen) return null;
 
-      const chosen = devices[idx - 1];
       const r = await plugin.connect({ address: chosen.address });
       if (!r.success) {
-        alert(`Could not connect: ${r.error ?? 'unknown error'}`);
+        showPrinterError(`Could not connect to ${chosen.name}.\n${r.error ?? 'Unknown error'}`);
         return null;
       }
 
@@ -442,7 +553,7 @@ export async function selectAndSavePrinter(): Promise<SavedPrinter | null> {
     }
   }
 
-  // Browser fallback
+  // Browser (dev) fallback — Web Bluetooth
   try {
     const nav = navigator as unknown as { bluetooth?: { requestDevice: (o: unknown) => Promise<BluetoothDevice> } };
     if (!nav.bluetooth) return null;
@@ -478,7 +589,7 @@ export async function autoReconnectPrinter(): Promise<void> {
       await plugin.connect({ address: saved.address });
     }
   } catch {
-    // Silent — the printer might be off, that's fine; we reconnect on print
+    // Silent — printer might be off; reconnect happens on next print
   }
 }
 
