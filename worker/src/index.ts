@@ -929,10 +929,10 @@ app.post('/api/sales', async (c) => {
 
   const receiptNumber = await generateReceiptNumber(c.env.DB)
   const saleId = uid()
-  const change = hasCash && body.tendered_amount != null
-    ? Math.round((body.tendered_amount - total) * 100) / 100
-    : 0
-
+const cashTotal = cashPayments.reduce((s, p) => s + p.amount, 0)
+const change = hasCash && body.tendered_amount != null
+  ? Math.round((body.tendered_amount - cashTotal) * 100) / 100
+  : 0
   // Bind sale_id into item rows
   saleItemRows.forEach(r => { r.sale_id = saleId })
 

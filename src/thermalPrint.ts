@@ -141,7 +141,11 @@ function line(s = ''): Uint8Array   { return txt(s + '\n'); }
 function columns(left: string, right: string, width: number): string {
   const gap = width - left.length - right.length;
   if (gap > 0) return left + ' '.repeat(gap) + right;
-  return left.slice(0, width - right.length - 1) + ' ' + right;
+  // Fix: clamp the slice start to 0 so we never pass a negative index when
+  // right.length >= width (e.g. very long addon names on 32-col paper).
+  // Also ensure the combined result never exceeds `width`.
+  const maxLeft = Math.max(0, width - right.length - 1);
+  return left.slice(0, maxLeft) + ' ' + right;
 }
 
 function dashes(n: number): string { return '-'.repeat(n); }
@@ -178,11 +182,13 @@ function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): 
   p(cmd(ALIGN_LEFT));
   p(line(dashes(cols)));
 
-  p(line(columns('Receipt:', sale.receipt_number,     cols)));
-  p(line(columns('Cashier:', sale.cashier_name,        cols)));
-  p(line(columns('Date:',    fmtDate(sale.created_at), cols)));
-  if (sale.note) p(line(columns('Note:', sale.note,    cols)));
-  p(line(dashes(cols)));
+p(line(columns('Receipt:', sale.receipt_number,     cols)));
+p(line(columns('Cashier:', sale.cashier_name,        cols)));
+p(line(columns('Date:',    fmtDate(sale.created_at), cols)));
+// Fix 4: print the order type so kitchen/front-of-house know dine-in vs take-out
+p(line(columns('Order:',   sale.order_type === 'take_out' ? 'Take Out' : 'Dine In', cols)));
+if (sale.note) p(line(columns('Note:', sale.note,    cols)));
+p(line(dashes(cols)));
 
   for (const item of sale.items) {
     const label = `${item.qty}x ${item.item_name}${item.size_name ? ` (${item.size_name})` : ''}`;

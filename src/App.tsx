@@ -64,7 +64,7 @@ function getCategoryColor(idx: number) {
 }
 
 // ─── Helpers ────────────────────────────────────────────────
-function fmt(amount: number) { return `₱${amount.toFixed(2)}`; }
+function fmt(amount: number) { return `P${amount.toFixed(2)}`; }
 function fmtDate(iso: string) {
   try { return format(parseISO(iso), 'MMM d, yyyy h:mm a'); } catch { return iso; }
 }
@@ -669,10 +669,12 @@ function SaleReceipt({ sale, settings }: { sale: SaleDetail; settings: SettingsT
         <div>{settings.store_contact}</div>
       </div>
       <div className="border-t border-dashed border-gray-300 my-2" />
-      <div className="flex justify-between"><span>Receipt:</span><span>{sale.receipt_number}</span></div>
-      <div className="flex justify-between"><span>Cashier:</span><span>{sale.cashier_name}</span></div>
-      <div className="flex justify-between"><span>Date:</span><span>{fmtDate(sale.created_at)}</span></div>
-      {sale.note && <div className="flex justify-between"><span>Note:</span><span>{sale.note}</span></div>}
+<div className="flex justify-between"><span>Receipt:</span><span>{sale.receipt_number}</span></div>
+<div className="flex justify-between"><span>Cashier:</span><span>{sale.cashier_name}</span></div>
+<div className="flex justify-between"><span>Date:</span><span>{fmtDate(sale.created_at)}</span></div>
+{/* Fix 4: show order type on screen receipt */}
+<div className="flex justify-between"><span>Order:</span><span>{sale.order_type === 'take_out' ? 'Take Out' : 'Dine In'}</span></div>
+{sale.note && <div className="flex justify-between"><span>Note:</span><span>{sale.note}</span></div>}
       <div className="border-t border-dashed border-gray-300 my-2" />
       {sale.items.map((item: SaleItemDetail, i: number) => (
         <div key={i} className="mb-1">
@@ -1763,11 +1765,13 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   const checkout = useCheckout();
   const { data: settings } = useSettings();
   const total = cart.total();
-  const [payments, setPayments] = useState<PaymentLine[]>([{ method: 'cash', amount: total }]);
-  const [tendered, setTendered] = useState('');
-  const [step, setStep] = useState<'payment' | 'success'>('payment');
-  const [result, setResult] = useState<{ receipt_number: string; change: number } | null>(null);
-  const [receiptData, setReceiptData] = useState<SaleDetail | null>(null);
+const [payments, setPayments] = useState<PaymentLine[]>([{ method: 'cash', amount: total }]);
+const [tendered, setTendered] = useState('');
+const [step, setStep] = useState<'payment' | 'success'>('payment');
+const [result, setResult] = useState<{ receipt_number: string; change: number } | null>(null);
+const [receiptData, setReceiptData] = useState<SaleDetail | null>(null);
+// Fix 6: allow cashier to select order type instead of hardcoding dine_in
+const [orderType, setOrderType] = useState<'dine_in' | 'take_out'>('dine_in');
 
   const paymentTotal = payments.reduce((s, p) => s + (p.amount || 0), 0);
   const hasCash = payments.some(p => p.method === 'cash');
@@ -1793,11 +1797,11 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   const doCheckout = async () => {
     if (!user) return;
     try {
-      const res = await checkout.mutateAsync({
-        idempotency_key: cart.cart.idempotency_key,
-        shift_id: shift?.id,
-        order_type: 'dine_in',
-        note: cart.cart.note || undefined,
+const res = await checkout.mutateAsync({
+  idempotency_key: cart.cart.idempotency_key,
+  shift_id: shift?.id,
+  order_type: orderType,           // Fix 6: use selected value
+  note: cart.cart.note || undefined,
         tendered_amount: hasCash && tendered ? tenderedNum : undefined,
         actioned_by_user_id: user.id,
         actioned_by_name: user.name,
@@ -1809,11 +1813,12 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
         })),
         payments,
       });
-      setResult({ receipt_number: res.receipt_number, change: res.change });
-      setReceiptData({
-        id: '', receipt_number: res.receipt_number,
-        cashier_id: user.id, cashier_name: user.name,
-        order_type: 'dine_in', status: 'completed', sale_type: 'normal',
+setResult({ receipt_number: res.receipt_number, change: res.change });
+setReceiptData({
+  id: '', receipt_number: res.receipt_number,
+  cashier_id: user.id, cashier_name: user.name,
+  order_type: orderType,           // Fix 6: use selected value
+  status: 'completed', sale_type: 'normal',
         total: res.total, discount_total: cart.discountTotal(), subtotal: cart.subtotal(),
         created_at: new Date().toISOString(), is_reprinted: false,
         shift_id: shift?.id ?? null, note: cart.cart.note || null,
@@ -1849,6 +1854,28 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
               style={{ backgroundColor: '#D1FAE5', boxShadow: '0 4px 20px rgba(16,185,129,0.25)' }}>
               <span className="text-4xl">✓</span>
             </div>
+            <div>
+  <p className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
+    style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Order Type</p>
+  <div className="flex gap-2">
+    {(['dine_in', 'take_out'] as const).map(type => (
+      <button
+        key={type}
+        type="button"
+        onClick={() => setOrderType(type)}
+        className="flex-1 py-2.5 rounded-xl text-sm font-700 border transition-all"
+        style={{
+          fontWeight: 700,
+          backgroundColor: orderType === type ? 'var(--mango-yellow)' : '#fff',
+          color: orderType === type ? '#78350f' : '#52525B',
+          borderColor: orderType === type ? 'var(--mango-yellow)' : '#E4E4E7',
+        }}
+      >
+        {type === 'dine_in' ? '🍽 Dine In' : '🥡 Take Out'}
+      </button>
+    ))}
+  </div>
+</div>
             <p className="text-gray-500 text-sm font-medium mb-1">Receipt</p>
             <div className="text-gray-900 font-900 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 900 }}>
               {result.receipt_number}
@@ -2598,16 +2625,19 @@ function SalesPage() {
   const handleReprint = () => setShowAnyPinForReprint(true);
 
   const doReprint = async (actioner: { user_id: string; user_name: string; role: string }) => {
-    if (!saleDetail) return;
-    setShowAnyPinForReprint(false);
-    await reprint.mutateAsync({ id: saleDetail.id, actioned_by_user_id: actioner.user_id, actioned_by_name: actioner.user_name });
-    toast('Reprint recorded');
-    if (settings) {
-      await printReceipt(saleDetail, settings);
-    } else {
-      window.print();
-    }
-  };
+  if (!saleDetail) return;
+  setShowAnyPinForReprint(false);
+  await reprint.mutateAsync({ id: saleDetail.id, actioned_by_user_id: actioner.user_id, actioned_by_name: actioner.user_name });
+  toast('Reprint recorded');
+  if (settings) {
+    await printReceipt(saleDetail, settings);
+  } else {
+    // Fix 5: window.print() does nothing inside a Capacitor Android WebView.
+    // If settings haven't loaded yet, show an actionable error instead of
+    // silently calling window.print() and leaving the user with no feedback.
+    toast('Printer settings not loaded yet — please try again in a moment.', 'error');
+  }
+};
 
   const handleDeleteConfirm = () => {
     if (!deleteReason) return;
