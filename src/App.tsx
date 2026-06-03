@@ -29,6 +29,13 @@ import {
   useUpdateAddon, useCreateAddon, useEditSale,
   useDeleteCategory, useReorderCategory, useDetailedSalesReport,
 } from './api';
+import {
+  printReceipt,
+  selectAndSavePrinter,
+  autoReconnectPrinter,
+  getSavedPrinter,
+  forgetPrinter,
+} from './thermalPrint';
 
 // ─── Category colour palette ───────────────────────────────────
 const CARD_COLOR_CLASSES = [
@@ -1862,7 +1869,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
             </div>
           )}
           <div className="flex gap-3">
-            <Btn variant="secondary" onClick={() => window.print()} className="flex-1">
+            <Btn variant="secondary" onClick={() => receiptData && settings && printReceipt(receiptData, settings)} className="flex-1">
               <Printer size={14} /> Print
             </Btn>
             <Btn variant="mango" onClick={onSuccess} className="flex-[2]" size="lg">
@@ -2595,7 +2602,11 @@ function SalesPage() {
     setShowAnyPinForReprint(false);
     await reprint.mutateAsync({ id: saleDetail.id, actioned_by_user_id: actioner.user_id, actioned_by_name: actioner.user_name });
     toast('Reprint recorded');
-    window.print();
+    if (settings) {
+      await printReceipt(saleDetail, settings);
+    } else {
+      window.print();
+    }
   };
 
   const handleDeleteConfirm = () => {
@@ -2989,6 +3000,8 @@ function AdminSettingsPage() {
   const updateSettings = useUpdateSettings();
   const [form, setForm] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState(false);
+  const [savedPrinter, setSavedPrinter] = useState(getSavedPrinter);
+  const [printerLoading, setPrinterLoading] = useState(false);
 
   useEffect(() => { if (settings) { setForm(settings); setDirty(false); } }, [settings]);
 
@@ -3775,6 +3788,8 @@ export default function App() {
         .then(res => { if (!res.ok) logout() })
         .catch(() => logout())
     }
+    // Silently reconnect to the saved Bluetooth printer on every app open
+    autoReconnectPrinter()
   }, [])
 
   if (!user || !token) return <LoginPage />
