@@ -3066,6 +3066,83 @@ function AdminSettingsPage() {
                 <Save size={16} /> Save All Changes
               </Btn>
             )}
+
+            {/* ── Bluetooth Printer Section ───────────────────────────── */}
+            <div className="mt-5 bg-white border border-gray-150 rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
+                <Printer size={14} className="text-gray-500" />
+                <span className="text-xs font-700 text-gray-700 uppercase tracking-wide" style={{ fontWeight: 700 }}>
+                  Bluetooth Printer
+                </span>
+              </div>
+              <div className="px-5 py-4">
+                {savedPrinter ? (
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center gap-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                      <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                        <Printer size={16} className="text-emerald-600" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-700 text-emerald-800 truncate" style={{ fontWeight: 700 }}>
+                          {savedPrinter.name}
+                        </p>
+                        <p className="text-xs text-emerald-600 font-mono">{savedPrinter.address}</p>
+                        <p className="text-xs text-emerald-500">{savedPrinter.width}mm paper</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Btn
+                        variant="secondary"
+                        size="sm"
+                        className="flex-1"
+                        loading={printerLoading}
+                        onClick={async () => {
+                          setPrinterLoading(true);
+                          try {
+                            const p = await selectAndSavePrinter();
+                            setSavedPrinter(p);
+                          } finally {
+                            setPrinterLoading(false);
+                          }
+                        }}
+                      >
+                        <RefreshCw size={12} /> Change Printer
+                      </Btn>
+                      <Btn
+                        variant="danger"
+                        size="sm"
+                        onClick={() => { forgetPrinter(); setSavedPrinter(null); }}
+                      >
+                        <Trash2 size={12} /> Forget
+                      </Btn>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-3">
+                    <p className="text-xs text-gray-500">
+                      No printer paired yet. Make sure your 57mm Bluetooth printer is powered on and paired in Android Settings, then tap below.
+                    </p>
+                    <Btn
+                      variant="secondary"
+                      fullWidth
+                      loading={printerLoading}
+                      onClick={async () => {
+                        setPrinterLoading(true);
+                        try {
+                          const p = await selectAndSavePrinter();
+                          setSavedPrinter(p);
+                        } finally {
+                          setPrinterLoading(false);
+                        }
+                      }}
+                    >
+                      <Printer size={14} /> Pair Bluetooth Printer
+                    </Btn>
+                  </div>
+                )}
+              </div>
+            </div>
+            {/* ── End Bluetooth Printer Section ───────────────────────── */}
           </div>
         )}
       </div>
