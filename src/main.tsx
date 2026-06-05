@@ -1,19 +1,79 @@
+// src/main.tsx
+//
+// CHANGES vs previous:
+//
+//  1. QueryClient staleTime elevated for specific hot paths:
+//     - 'menu' is set to 5 min globally (was 2 min). Menu items rarely change
+//       mid-shift; a stale 5-min window avoids spurious re-fetches every time
+//       a cashier taps a category or opens/closes a modal.
+//     - gcTime kept at 5 min so the cache survives brief connectivity drops on
+//       LAN Wi-Fi without needing to re-download 200 KB of menu JSON.
+//
+//  2. Removed StrictMode toggle guard — the conditional was actually identical
+//     in both branches (StrictMode only affects dev). Using a single
+//     import.meta.env.DEV check is cleaner and has zero runtime cost in prod.
+//
+//  3. Added focusManager.setEventListener(noop) — React Query re-fetches all
+//     stale queries when the browser tab regains focus. On Android, the WebView
+//     fires focus events when the soft keyboard opens/closes, causing unwanted
+//     API bursts mid-transaction. The custom listener suppresses window-focus
+//     triggers completely; explicit refetch() calls in the app still work fine.
+//
+//  4. Added onlineManager.setEventListener — uses the Network Information API
+//     (available in Chromium WebView) to trigger re-fetches only on genuine
+//     network reconnects rather than on every DOM online event.
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, focusManager, onlineManager } from '@tanstack/react-query'
 import App from './App'
 import './index.css'
 
+// ── PERF: suppress window-focus re-fetches ───────────────────────────────────
+// On Android, focus events fire when the soft keyboard toggles, causing
+// React Query to burst-refetch every stale query mid-transaction.
+// We disable the default focus listener here; pages that need manual refresh
+// call queryClient.invalidateQueries() or use refetchInterval explicitly.
+focusManager.setEventListener(() => {
+  // Return a no-op unsubscribe — we simply never fire "focus".
+  return () => {}
+})
+
+// ── PERF: use Network Information API for online detection ───────────────────
+// Android Chrome / WebView exposes navigator.connection; using it avoids
+// false "back online" triggers from DOM events that don't represent real
+// network transitions (e.g. VPN handshakes, radio sleep/wake cycles).
+onlineManager.setEventListener((setOnline) => {
+  const connection = (navigator as Navigator & { connection?: EventTarget }).connection
+  const target = connection ?? window
+
+  const handler = () => {
+    setOnline(navigator.onLine)
+  }
+
+  target.addEventListener('change' in target ? 'change' : 'online', handler)
+  window.addEventListener('offline', handler)
+
+  return () => {
+    target.removeEventListener('change' in target ? 'change' : 'online', handler)
+    window.removeEventListener('offline', handler)
+  }
+})
+
+// ── QueryClient ──────────────────────────────────────────────────────────────
 const qc = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
-      // Menu data stays fresh for 2 min – reduces re-fetches while tapping items
-      staleTime: 2 * 60_000,
-      // Keep old data on screen for up to 5 min while re-fetching in background
+      // 5 min stale window — menu/settings/shift rarely change mid-session.
+      // Explicit mutation invalidations keep data fresh after writes.
+      staleTime: 5 * 60_000,
+      // Keep old data for 5 min while re-fetching in the background.
       gcTime: 5 * 60_000,
-      // Don't refetch just because the window regained focus (common on mobile)
+      // Focus-based refetch disabled above (focusManager).
       refetchOnWindowFocus: false,
+      // Don't retry on mount if the data is still within staleTime.
+      refetchOnMount: true,
     },
     mutations: {
       retry: 0,
@@ -21,8 +81,9 @@ const qc = new QueryClient({
   },
 })
 
-// Remove StrictMode in production so components only mount once
-// (StrictMode double-mounts every component in dev which appears laggy)
+// ── Render ───────────────────────────────────────────────────────────────────
+// StrictMode is only active in dev (it double-mounts in dev, which surfaces
+// side-effect bugs — good for development, wasteful in production).
 const root = ReactDOM.createRoot(document.getElementById('root')!)
 
 if (import.meta.env.DEV) {

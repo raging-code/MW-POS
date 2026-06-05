@@ -1,15 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- android/app/src/main/AndroidManifest.xml -->
 <!--
-  Changes vs previous version:
-    + android:hardwareAccelerated="true"   — explicit GPU compositing per-activity
-    + android:largeHeap="true"             — raises heap limit on low-RAM devices;
-                                             prevents GC pauses mid-transaction
-    + android:networkSecurityConfig        — references the new network_security_config.xml
-    + android:extractNativeLibs="false"    — loads .so files directly from the APK
-                                             (faster cold start, smaller install size)
-    + android:enableOnBackInvokedCallback  — predictive back gesture on Android 13+
-    + META-TAG: asset statements removed;  — slightly faster asset unpacking
+  CHANGES vs previous version:
+    + android:vmSafeMode="false"         — explicit opt-out of the Dalvik VM
+                                           safe-mode bailout path (unnecessary
+                                           overhead on standard builds).
+    + android:testOnly="false"           — explicit marker; prevents accidental
+                                           test-only APK distribution.
+    + android:useEmbeddedDex="true"      — (API 29+) keeps DEX files uncompressed
+                                           in the APK so ART can map them directly
+                                           from the APK without extracting to disk.
+                                           Faster cold-start on API 29+ devices.
+    KEPT unchanged:
+    + android:hardwareAccelerated="true"
+    + android:largeHeap="true"
+    + android:extractNativeLibs="false"
+    + android:networkSecurityConfig
+    + android:enableOnBackInvokedCallback
     All Bluetooth permissions preserved unchanged.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -46,7 +53,12 @@
         android:largeHeap="true"
         android:extractNativeLibs="false"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:enableOnBackInvokedCallback="true">
+        android:enableOnBackInvokedCallback="true"
+
+        android:vmSafeMode="false"
+        android:testOnly="false"
+
+        android:useEmbeddedDex="true">
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"

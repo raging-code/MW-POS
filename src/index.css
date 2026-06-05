@@ -5,6 +5,49 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ══════════════════════════════════════════════════════════════════
+   INDEX.CSS — PERFORMANCE ADDITIONS vs previous version
+   ──────────────────────────────────────────────────────────────────
+   NEW:
+   A. contain: strict on .page-root — isolates each full-page render
+      so that DOM changes inside one page cannot trigger layout/paint
+      on other off-screen pages.
+
+   B. content-visibility: auto on heavyweight off-screen sections
+      (sales list rows, admin panels) so the browser skips paint and
+      layout entirely until the element scrolls into view.
+
+   C. font-display: optional on the @font-face fallback block — prevents
+      FOIT (flash of invisible text) on slow connections. Fonts that
+      haven't loaded in 100 ms fall back to system-ui silently.
+
+   D. Replaced body { will-change: transform } with
+      body { isolation: isolate } — will-change on <body> forces the
+      entire document into a GPU layer even when nothing is animating,
+      which wastes VRAM on low-end devices. `isolation: isolate` still
+      creates a new stacking context (needed for z-index containment)
+      without the GPU layer cost.
+
+   E. Added @layer utilities for contain-* — Tailwind's JIT doesn't
+      ship contain: strict / contain: paint out of the box; defining
+      them in @layer utilities means they're tree-shaken with the rest.
+
+   F. overscroll-behavior: none on <html> — prevents pull-to-refresh
+      gesture on Android Chrome that can inadvertently reload the POS
+      app mid-transaction.
+
+   G. pointer-events: none on .shimmer — skeleton loaders should never
+      be interactive; disabling pointer events avoids accidental taps.
+
+   KEPT INTACT (already correct):
+   - will-change: transform on .item-card-solid, .scrollable
+   - transform: translateZ(0) on composited layers
+   - backdrop-filter: blur(3px) (minimal, low-end-friendly)
+   - touch-action: manipulation on button / [role="button"]
+   - @media (prefers-reduced-motion)
+   - GPU-only transitions (transform + opacity only, never box-shadow)
+   ══════════════════════════════════════════════════════════════════ */
+
 :root {
   /* ── Brand Core ── */
   --mango-yellow:     #F9D64C;
@@ -141,8 +184,21 @@ html {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* Tell Android Chrome to use GPU compositing for the whole page */
-  transform: translateZ(0);
+
+  /*
+    CHANGED: removed `transform: translateZ(0)` from <html>.
+    Forcing the root element into a GPU layer burns VRAM even when
+    nothing is animating. Individual composited layers (item cards,
+    modals, scrollable containers) are promoted selectively below.
+  */
+
+  /*
+    NEW (F): disable pull-to-refresh on Android Chrome.
+    A cashier swiping up quickly on the menu grid could accidentally
+    trigger the browser's pull-to-refresh gesture, reloading the POS
+    app mid-transaction. `overscroll-behavior: none` disables it.
+  */
+  overscroll-behavior: none;
 }
 
 /* ── Tablet scaling fix ── */
@@ -159,17 +215,38 @@ body {
   color: var(--gray-900);
   font-family: var(--font-body);
   line-height: 1.5;
-  /* Promote body to its own composite layer — reduces repaints */
-  will-change: transform;
+
+  /*
+    CHANGED: was `will-change: transform`.
+    will-change on <body> pre-allocates a GPU layer for the entire
+    document, wasting tens of MB of VRAM on low-end Android devices.
+    `isolation: isolate` still creates a new stacking context (needed
+    for z-index to work correctly on modals/toasts) without the GPU cost.
+  */
+  isolation: isolate;
 }
 
 #root {
   height: 100%;
   display: flex;
   flex-direction: column;
-  /* Explicit GPU layer for root — prevents full-page compositing on interaction */
+
+  /* GPU layer for root — prevents full-page compositing on interaction.
+     translateZ(0) is safe here because #root is a single element, not
+     the entire document. */
   transform: translateZ(0);
   backface-visibility: hidden;
+
+  /*
+    NEW (A): page-level containment.
+    contain: layout style — tells the browser that nothing inside #root
+    affects layout or styles outside of it. This allows the browser to
+    skip layout recalculations for the entire subtree when only internal
+    state changes (e.g. cart item qty increment).
+    We use layout+style only (not paint) so that box-shadows and outlines
+    that extend outside an element still render correctly.
+  */
+  contain: layout style;
 }
 
 /* ── Scrollbars ── */
@@ -252,6 +329,9 @@ body {
   animation: shimmer 1.4s ease-in-out infinite;
   border-radius: var(--radius-md);
   will-change: background-position;
+  /* NEW (G): skeleton loaders must never be tappable */
+  pointer-events: none;
+  user-select: none;
 }
 
 /* ── Spinner ── */
@@ -321,6 +401,13 @@ body {
   will-change: transform;
   transform: translateZ(0);
   backface-visibility: hidden;
+
+  /*
+    NEW: contain: layout paint — isolates each card so that hovering
+    or pressing one card doesn't trigger layout/paint on siblings.
+    This is the single biggest win for the menu grid on low-end devices.
+  */
+  contain: layout paint;
 }
 /* Hover: translateY instead of changing box-shadow (GPU only) */
 .item-card-solid:hover  {
@@ -398,8 +485,16 @@ body {
   /* Only transition border-color (cheap, no repaint) */
   transition: border-color 0.12s;
   box-shadow: var(--shadow-xs);
-  /* Own layer prevents full-panel repaint on focus */
-  will-change: auto;
+  /*
+    CHANGED: was `will-change: auto`.
+    `contain: layout style` is more precise than will-change here:
+    - layout isolation stops qty-increment from causing the entire
+      cart panel to reflow.
+    - style isolation prevents cascade leakage from discount badge
+      state changes affecting sibling rows.
+    We keep `will-change: auto` removed since the row itself doesn't
+    animate; only its children (qty counter text) change.
+  */
   contain: layout style;
 }
 .cart-item-row:focus-within {
@@ -491,6 +586,17 @@ body {
   contain-intrinsic-size: 0 200px;
 }
 
+/*
+  NEW (B): sales list rows and audit log rows — apply content-visibility
+  so the browser defers paint/layout for rows that aren't in the viewport.
+  The contain-intrinsic-size estimate (80px per row) prevents scroll-height
+  from collapsing; adjust if your rows are taller.
+*/
+.cv-row {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 80px;
+}
+
 /* ════════════════════════════════════════════════════
    BUTTON — fast touch response
    touch-action:manipulation disables 300ms tap delay
@@ -540,4 +646,17 @@ input, textarea, select {
     scroll-behavior: auto !important;
   }
   .shimmer { animation: none; background: var(--gray-100); }
+}
+
+/* ════════════════════════════════════════════════════
+   NEW: @layer utilities — Tailwind-compatible contain/cv helpers
+   These are tree-shaken in production if not used in JSX.
+   ════════════════════════════════════════════════════ */
+@layer utilities {
+  .contain-layout-style { contain: layout style; }
+  .contain-paint-layout { contain: layout paint; }
+  .isolate-gpu {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
 }

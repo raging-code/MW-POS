@@ -1,6 +1,38 @@
 // src/api.ts — All API calls + React Query hooks
+//
+// CHANGES vs previous version:
+//
+//  1. apiFetch now accepts an AbortSignal — React Query passes one
+//     automatically when a query is cancelled (e.g. component unmounts).
+//     Without it, in-flight fetch requests keep the network connection
+//     open and consume CPU parsing the response even after the component
+//     is gone. This is especially noticeable on the Sales page where
+//     users frequently navigate away while a date-range query is loading.
+//
+//  2. useMenu staleTime raised to 5 min (was 1 min) and aligned with
+//     the global QueryClient default. A 1-min staleTime caused a
+//     background menu re-fetch every time the cashier opened/closed
+//     a modal (modal open → focus event → stale check → background refetch).
+//     With focusManager disabled in main.tsx this is less critical, but
+//     the longer staleTime prevents unnecessary network use on LAN.
+//
+//  3. useCurrentShift refetchInterval increased to 60 s (was 30 s).
+//     Shift state changes are rare (open/close once per day) and the
+//     mutation already calls invalidateQueries immediately. Polling
+//     every 30 s was doubling network traffic for no practical benefit.
+//
+//  4. useHeldOrders: added staleTime: 0 — held orders ARE time-sensitive
+//     (another device may park/restore an order). Keeping them at
+//     staleTime: 0 means they always re-fetch when the modal opens,
+//     but we don't poll continuously.
+//
+//  5. useSales, useAuditLogs, useSalesReport — added keepPreviousData:
+//     true (React Query v5: placeholderData: keepPreviousData).
+//     When the user changes the date filter, the old results stay
+//     visible while the new query loads instead of flashing a skeleton.
+//     This makes the Sales page feel dramatically more responsive.
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { useAuthStore } from './store'
 import type {
   User, Category, SaleListItem, SaleDetail, Shift, HeldOrder,
@@ -19,8 +51,8 @@ async function apiFetch<T>(
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(opts.headers as Record<string, string> ?? {}),
   }
-const BASE = import.meta.env.VITE_API_URL ?? ''
-const res = await fetch(`${BASE}${path}`, { ...opts, headers })
+  const BASE = import.meta.env.VITE_API_URL ?? ''
+  const res = await fetch(`${BASE}${path}`, { ...opts, headers })
   const json = await res.json() as { data: T; error: string | null }
   if (json.error) throw new Error(json.error)
   return json.data as T
@@ -29,7 +61,9 @@ const res = await fetch(`${BASE}${path}`, { ...opts, headers })
 function useApi() {
   const token = useAuthStore(s => s.token)
   return {
-    get: <T>(path: string) => apiFetch<T>(path, { method: 'GET' }, token),
+    // CHANGED: pass signal through so React Query can abort in-flight requests
+    get: <T>(path: string, signal?: AbortSignal) =>
+      apiFetch<T>(path, { method: 'GET', signal }, token),
     post: <T>(path: string, body: unknown) =>
       apiFetch<T>(path, { method: 'POST', body: JSON.stringify(body) }, token),
     put: <T>(path: string, body: unknown) =>
@@ -43,7 +77,7 @@ function useApi() {
 export function useUsersList() {
   return useQuery({
     queryKey: ['users-list'],
-    queryFn: () => apiFetch<User[]>('/auth/users'),
+    queryFn: ({ signal }) => apiFetch<User[]>('/auth/users', { signal }),
   })
 }
 
@@ -51,7 +85,7 @@ export function useUsersListAuth() {
   const api = useApi()
   return useQuery({
     queryKey: ['users-list-auth'],
-    queryFn: () => api.get<User[]>('/auth/users'),
+    queryFn: ({ signal }) => api.get<User[]>('/auth/users', signal),
   })
 }
 
@@ -77,8 +111,11 @@ export function useMenu() {
   const api = useApi()
   return useQuery({
     queryKey: ['menu'],
-    queryFn: () => api.get<{ categories: Category[]; addons: Addon[] }>('/menu'),
-    staleTime: 1000 * 60,
+    queryFn: ({ signal }) => api.get<{ categories: Category[]; addons: Addon[] }>('/menu', signal),
+    // CHANGED: 5 min (was 1 min). Aligned with global default.
+    // Menu mutations call invalidateQueries immediately so cashiers
+    // always see up-to-date data after an admin edit.
+    staleTime: 5 * 60_000,
   })
 }
 
@@ -91,7 +128,6 @@ export function useCreateCategory() {
   })
 }
 
-// NEW – delete category (backend must implement DELETE /menu/categories/:id)
 export function useDeleteCategory() {
   const api = useApi()
   const qc = useQueryClient()
@@ -99,12 +135,11 @@ export function useDeleteCategory() {
     mutationFn: (id: string) => api.del(`/menu/categories/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['menu'] })
-      qc.invalidateQueries({ queryKey: ['audit-logs'] }) // will appear in logs
+      qc.invalidateQueries({ queryKey: ['audit-logs'] })
     },
   })
 }
 
-// NEW – reorder category (backend must implement PUT /menu/categories/:id/reorder)
 export function useReorderCategory() {
   const api = useApi()
   const qc = useQueryClient()
@@ -178,8 +213,10 @@ export function useCurrentShift() {
   const api = useApi()
   return useQuery({
     queryKey: ['shift-current'],
-    queryFn: () => api.get<Shift | null>('/shifts/current'),
-    refetchInterval: 30_000,
+    queryFn: ({ signal }) => api.get<Shift | null>('/shifts/current', signal),
+    // CHANGED: 60 s (was 30 s). Shift state changes via mutation already
+    // call invalidateQueries, so continuous polling is mostly redundant.
+    refetchInterval: 60_000,
   })
 }
 
@@ -217,7 +254,10 @@ export function useHeldOrders() {
   const api = useApi()
   return useQuery({
     queryKey: ['held-orders'],
-    queryFn: () => api.get<HeldOrder[]>('/held-orders'),
+    queryFn: ({ signal }) => api.get<HeldOrder[]>('/held-orders', signal),
+    // CHANGED: staleTime: 0 — held orders must always be fresh when
+    // the modal opens because another terminal may have parked/restored one.
+    staleTime: 0,
   })
 }
 
@@ -262,7 +302,10 @@ export function useSales(params?: { date_from?: string; date_to?: string; status
   if (params?.receipt) qs.set('receipt', params.receipt)
   return useQuery({
     queryKey: ['sales', params],
-    queryFn: () => api.get<SaleListItem[]>(`/sales?${qs}`),
+    queryFn: ({ signal }) => api.get<SaleListItem[]>(`/sales?${qs}`, signal),
+    // CHANGED: keep previous data visible while new date filter loads.
+    // Prevents the full skeleton flash when the user changes From/To dates.
+    placeholderData: keepPreviousData,
   })
 }
 
@@ -270,7 +313,7 @@ export function useSaleDetail(id: string | null) {
   const api = useApi()
   return useQuery({
     queryKey: ['sale', id],
-    queryFn: () => api.get<SaleDetail>(`/sales/${id}`),
+    queryFn: ({ signal }) => api.get<SaleDetail>(`/sales/${id}`, signal),
     enabled: !!id,
   })
 }
@@ -355,11 +398,12 @@ export function useSalesReport(params?: { date_from?: string; date_to?: string }
   if (params?.date_to) qs.set('date_to', params.date_to)
   return useQuery({
     queryKey: ['report-sales', params],
-    queryFn: () => api.get<SalesReport>(`/reports/sales?${qs}`),
+    queryFn: ({ signal }) => api.get<SalesReport>(`/reports/sales?${qs}`, signal),
+    // CHANGED: show stale data while new date range loads.
+    placeholderData: keepPreviousData,
   })
 }
 
-// NEW – detailed sales report (backend must implement GET /reports/sales-detailed)
 export function useDetailedSalesReport(params: {
   period: string;
   date?: string;
@@ -379,7 +423,7 @@ export function useDetailedSalesReport(params: {
 
   return useQuery({
     queryKey: ['report-sales-detailed', params],
-    queryFn: () => api.get<{
+    queryFn: ({ signal }) => api.get<{
       total_sales: number;
       transaction_count: number;
       avg_sale: number;
@@ -389,7 +433,8 @@ export function useDetailedSalesReport(params: {
       edited_count: number;
       deleted_count: number;
       payment_breakdown: Record<string, number>;
-    }>(`/reports/sales-detailed?${qs}`),
+    }>(`/reports/sales-detailed?${qs}`, signal),
+    placeholderData: keepPreviousData,
   })
 }
 
@@ -398,7 +443,7 @@ export function useSettings() {
   const api = useApi()
   return useQuery({
     queryKey: ['settings'],
-    queryFn: () => api.get<Settings>('/settings'),
+    queryFn: ({ signal }) => api.get<Settings>('/settings', signal),
   })
 }
 
@@ -416,7 +461,7 @@ export function useUsers() {
   const api = useApi()
   return useQuery({
     queryKey: ['users'],
-    queryFn: () => api.get<User[]>('/users'),
+    queryFn: ({ signal }) => api.get<User[]>('/users', signal),
   })
 }
 
@@ -472,6 +517,8 @@ export function useAuditLogs(params?: { entity_type?: string; date_from?: string
   if (params?.date_to) qs.set('date_to', params.date_to)
   return useQuery({
     queryKey: ['audit-logs', params],
-    queryFn: () => api.get<AuditLog[]>(`/audit-logs?${qs}`),
+    queryFn: ({ signal }) => api.get<AuditLog[]>(`/audit-logs?${qs}`, signal),
+    // CHANGED: keep old logs visible while new filter loads.
+    placeholderData: keepPreviousData,
   })
 }

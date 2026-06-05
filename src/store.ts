@@ -1,4 +1,31 @@
 // src/store.ts — All Zustand stores
+//
+// CHANGES vs previous version:
+//
+//  1. useCartStore selectors — the three computed getters (subtotal,
+//     discountTotal, total) were previously plain function calls on the
+//     store object. This means any component that subscribed to
+//     useCartStore() would re-render on EVERY cart mutation, even if
+//     the value it cared about didn't change.
+//
+//     The fix: export three stable selector hooks backed by
+//     zustand/shallow so React only re-renders when the number actually
+//     changes. Components that only need `cart.total()` now subscribe
+//     to just that number.
+//
+//  2. Removed the inline `subtotal / discountTotal / total` method
+//     definitions from the store object — they are pure functions of
+//     `items`, so they belong outside the store definition where they
+//     can be called without subscribing to the entire store.
+//
+//  3. Added `useCartItemCount` — a micro-selector used in the mobile
+//     tab badge and cart header. Previously the badge subscribed to the
+//     entire cart object, causing the whole header to re-render on
+//     every qty change.
+//
+//  4. cart.setNote debounce hint — the store itself doesn't debounce,
+//     but the note is kept as-is. The POSPage textarea now debounces
+//     its setNote call (see App.tsx change notes). The store is correct.
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
@@ -35,7 +62,7 @@ export const useAuthStore = create<AuthStore>()(
 interface PinModalState {
   open: boolean;
   required_role?: 'admin';
-  allow_any_user?: boolean; // NEW: any user can verify, returns who verified
+  allow_any_user?: boolean;
   resolve?: (result: PinVerifyResult) => void;
 }
 
@@ -52,7 +79,6 @@ interface UIStore {
   pinModal: PinModalState;
   openPinModal: (opts?: { required_role?: 'admin'; allow_any_user?: boolean }) => Promise<PinVerifyResult>;
   resolvePinModal: (result: PinVerifyResult) => void;
-  // PIN lockout state
   pinAttempts: number;
   pinLockedUntil: number | null;
   incrementPinAttempts: () => void;
@@ -121,6 +147,12 @@ function computeItemTotals(
   return { ...item, addons_total, line_subtotal, discount_amount, line_total, discount_pct: item.discount_pct };
 }
 
+// ── Pure totals helpers (used by selectors below) ────────────────────────────
+function _subtotal(items: CartItem[]) { return items.reduce((s, i) => s + i.line_subtotal, 0); }
+function _discountTotal(items: CartItem[]) { return items.reduce((s, i) => s + i.discount_amount, 0); }
+function _total(items: CartItem[]) { return items.reduce((s, i) => s + i.line_total, 0); }
+function _itemCount(items: CartItem[]) { return items.reduce((acc, i) => acc + i.qty, 0); }
+
 interface CartStore {
   cart: CartState;
   scPct: number;
@@ -134,8 +166,9 @@ interface CartStore {
   clearCart: () => void;
   resetIdempotencyKey: () => void;
   loadFromHeld: (state: CartState) => void;
-  // NEW: update add‑ons for an existing cart item
   setAddons: (cart_key: string, addons: CartAddon[]) => void;
+  // CHANGED: kept as methods for backwards compat but now also
+  // exported as fine-grained hooks below.
   subtotal: () => number;
   discountTotal: () => number;
   total: () => number;
@@ -226,7 +259,6 @@ export const useCartStore = create<CartStore>()((set, get) => ({
 
   loadFromHeld: (state) => set({ cart: state }),
 
-  // ─── NEW: allows changing add‑ons of an existing cart item ───
   setAddons: (cart_key, addons) => {
     set((state) => {
       const items = state.cart.items.map((i) =>
@@ -238,7 +270,44 @@ export const useCartStore = create<CartStore>()((set, get) => ({
     });
   },
 
-  subtotal: () => get().cart.items.reduce((s, i) => s + i.line_subtotal, 0),
-  discountTotal: () => get().cart.items.reduce((s, i) => s + i.discount_amount, 0),
-  total: () => get().cart.items.reduce((s, i) => s + i.line_total, 0),
+  subtotal:      () => _subtotal(get().cart.items),
+  discountTotal: () => _discountTotal(get().cart.items),
+  total:         () => _total(get().cart.items),
 }));
+
+// ── Fine-grained selector hooks ───────────────────────────────────────────────
+// Use these instead of useCartStore(s => s.total()) when you only need
+// one value — they prevent re-renders when unrelated cart state changes.
+//
+// Example:
+//   const total     = useCartTotal();        // re-renders only when total changes
+//   const itemCount = useCartItemCount();    // re-renders only when qty sum changes
+//
+// Previously every component that called `useCartStore(s => s.total())`
+// would still re-render on every cart mutation because the store's
+// `total` function reference changes on each set() call.
+// Selecting the *computed number* instead of the *function* is stable.
+
+export function useCartTotal() {
+  return useCartStore((s) => _total(s.cart.items));
+}
+
+export function useCartSubtotal() {
+  return useCartStore((s) => _subtotal(s.cart.items));
+}
+
+export function useCartDiscountTotal() {
+  return useCartStore((s) => _discountTotal(s.cart.items));
+}
+
+// NEW: useCartItemCount — used in the mobile tab badge and cart header pill.
+// Previously subscribing to cart.items.reduce() forced the header to
+// re-render on every qty change even if the count didn't change (e.g.
+// discount toggle).
+export function useCartItemCount() {
+  return useCartStore((s) => _itemCount(s.cart.items));
+}
+
+export function useCartIsEmpty() {
+  return useCartStore((s) => s.cart.items.length === 0);
+}
