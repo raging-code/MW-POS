@@ -102,13 +102,5 @@ class MainActivity : BridgeActivity() {
         //
         //   Previously two separate `webView.webViewClient = ...` calls meant
         //   the second silently replaced the first. Merged into one object.
-        webView.webViewClient = object : WebViewClient() {
-            override fun onPageFinished(view: WebView?, url: String?) {
-                super.onPageFinished(view, url)
-                // `void 0` is a harmless no-op in production Chromium but nudges
-                // the V8 idle task scheduler to run a minor GC before user input.
-                view?.evaluateJavascript("void 0;", null)
-            }
-        }
     }
 }
