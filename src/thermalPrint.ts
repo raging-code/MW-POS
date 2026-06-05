@@ -178,7 +178,6 @@ function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): 
   p(line(settings.store_name || 'Mango Warrior'));
   p(cmd(NORMAL_SIZE), cmd(BOLD_OFF));
   if (settings.store_address) p(line(settings.store_address));
-  if (settings.store_contact) p(line(settings.store_contact));
   p(cmd(ALIGN_LEFT));
   p(line(dashes(cols)));
 
@@ -227,8 +226,9 @@ p(line(dashes(cols)));
     p(cmd(BOLD_ON), line('*** MISSED SALE ***'), cmd(BOLD_OFF));
   }
 
-  // 4 line feeds to advance paper past cutter, then full-cut
-  p(cmd(LF), cmd(LF), cmd(LF), cmd(LF), cmd(CUT));
+  // Extra blank lines after footer so the text clears the cutter blade,
+  // then 4 line feeds to advance paper past the cutter, then full-cut.
+  p(cmd(LF), cmd(LF), cmd(LF), cmd(LF), cmd(LF), cmd(LF), cmd(CUT));
 
   return mergeBytes(parts);
 }
@@ -478,7 +478,7 @@ function windowPrintFallback(paperWidth: PaperWidth): void {
         left: 0 !important; top: 0 !important;
         width: ${mmWidth} !important;
         max-width: ${mmWidth} !important;
-        padding: 4px !important;
+        padding: 4px 4px 40px 4px !important;
         font-size: 11px !important;
         font-family: 'Courier New', Courier, monospace !important;
         line-height: 1.4 !important;

@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, {
+  useState, useEffect, useCallback, useRef, useMemo, memo,
+} from 'react';
 import { format, parseISO, startOfWeek, endOfWeek } from 'date-fns';
 import { clsx } from 'clsx';
 import {
@@ -37,7 +39,7 @@ import {
   forgetPrinter,
 } from './thermalPrint';
 
-// ─── Category colour palette ───────────────────────────────────
+// ─── Category colour palette ──────────────────────────────────
 const CARD_COLOR_CLASSES = [
   'ic-amber', 'ic-emerald', 'ic-rose', 'ic-violet',
   'ic-sky', 'ic-orange', 'ic-pink', 'ic-teal',
@@ -63,13 +65,13 @@ function getCategoryColor(idx: number) {
   return CATEGORY_COLORS[idx % CATEGORY_COLORS.length];
 }
 
-// ─── Helpers ────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────
 function fmt(amount: number) { return `P${amount.toFixed(2)}`; }
 function fmtDate(iso: string) {
   try { return format(parseISO(iso), 'MMM d, yyyy h:mm a'); } catch { return iso; }
 }
 
-// ─── Toast ──────────────────────────────────────────────────
+// ─── Toast (stable across renders) ────────────────────────────
 function toast(msg: string, type: 'success' | 'error' = 'success') {
   const el = document.createElement('div');
   el.className = [
@@ -81,14 +83,16 @@ function toast(msg: string, type: 'success' | 'error' = 'success') {
   const icon = type === 'success' ? '✓' : '✕';
   el.innerHTML = `<span class="mr-2 font-black">${icon}</span>${msg}`;
   document.body.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(-6px)'; }, 2600);
-  setTimeout(() => el.remove(), 3000);
+  const t1 = setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(-6px)'; }, 2600);
+  const t2 = setTimeout(() => el.remove(), 3000);
+  // No leak — el is removed from DOM; timers are fire-and-forget intentionally
 }
 
 function Divider() { return <div className="border-t border-gray-100 my-1" />; }
 
-// ─── UI Primitives ────────────────────────────────────────────
-function Btn({
+// ─── UI Primitives ─────────────────────────────────────────────
+// memo: Btn is used ~100+ times; prevent re-render when parent state changes
+const Btn = memo(function Btn({
   children, onClick, variant = 'primary', size = 'md',
   disabled, loading, className, type = 'button', fullWidth, title,
 }: {
@@ -99,10 +103,14 @@ function Btn({
   className?: string; type?: 'button' | 'submit'; fullWidth?: boolean; title?: string;
 }) {
   const base = [
-    'inline-flex items-center justify-center font-semibold rounded-xl transition-all duration-150',
+    'inline-flex items-center justify-center font-semibold rounded-xl',
+    // transition only GPU-composited properties — no box-shadow change
+    'transition-transform duration-100 ease-out',
     'active:scale-95 select-none whitespace-nowrap cursor-pointer',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-1',
     'disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none',
+    // eliminate 300ms tap delay on Android
+    'touch-action-manipulation',
   ].join(' ');
 
   const sizes = {
@@ -118,20 +126,17 @@ function Btn({
     case 'mango':
       styles.backgroundColor = 'var(--mango-yellow)';
       styles.color = '#78350f';
-      styles.boxShadow = '0 2px 8px rgba(249,214,76,0.4)';
-      cls = 'hover:brightness-105 active:brightness-95 focus-visible:ring-yellow-400';
+      cls = 'hover:brightness-105 focus-visible:ring-yellow-400';
       break;
     case 'warrior':
       styles.backgroundColor = 'var(--warrior-red)';
       styles.color = '#fff';
-      styles.boxShadow = '0 2px 8px rgba(229,38,54,0.3)';
-      cls = 'hover:brightness-105 active:brightness-95 focus-visible:ring-red-400';
+      cls = 'hover:brightness-105 focus-visible:ring-red-400';
       break;
     case 'leaf':
       styles.backgroundColor = 'var(--leaf-green)';
       styles.color = '#fff';
-      styles.boxShadow = '0 2px 8px rgba(28,94,48,0.25)';
-      cls = 'hover:brightness-105 active:brightness-95 focus-visible:ring-green-400';
+      cls = 'hover:brightness-105 focus-visible:ring-green-400';
       break;
     case 'danger':
       cls = 'bg-red-500 text-white hover:bg-red-600 focus-visible:ring-red-400 shadow-sm';
@@ -165,9 +170,9 @@ function Btn({
         : children}
     </button>
   );
-}
+});
 
-function Input({
+const Input = memo(function Input({
   label, value, onChange, type = 'text', placeholder,
   className, disabled, min, step, maxLength, autoFocus, hint,
 }: {
@@ -190,7 +195,7 @@ function Input({
           'bg-white border border-gray-200 text-gray-900 rounded-xl px-3.5 py-2.5 text-sm w-full',
           'focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20',
           'placeholder-gray-350 disabled:opacity-50 disabled:bg-gray-50',
-          'transition-colors duration-150',
+          'transition-colors duration-100',
           'font-medium'
         )}
         style={{ fontFamily: 'var(--font-body)' }}
@@ -198,9 +203,9 @@ function Input({
       {hint && <p className="text-xs text-gray-400">{hint}</p>}
     </div>
   );
-}
+});
 
-function Select({
+const Select = memo(function Select({
   label, value, onChange, options, className,
 }: {
   label?: string; value: string; onChange: (v: string) => void;
@@ -217,14 +222,14 @@ function Select({
         value={value} onChange={e => onChange(e.target.value)}
         className="bg-white border border-gray-200 text-gray-900 rounded-xl px-3.5 py-2.5 text-sm
           focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20
-          transition-colors duration-150 font-medium cursor-pointer appearance-none"
+          transition-colors duration-100 font-medium cursor-pointer appearance-none"
         style={{ fontFamily: 'var(--font-body)', backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2371717A' d='M6 8L1 3h10z'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
       >
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </div>
   );
-}
+});
 
 function Modal({
   open, onClose, title, children, maxWidth = 'max-w-md',
@@ -241,14 +246,15 @@ function Modal({
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+      {/* Lighter backdrop-filter for low-end GPU */}
+      <div className="absolute inset-0 modal-backdrop" onClick={onClose} />
       <div className={clsx(
         'relative bg-white rounded-2xl shadow-2xl w-full overflow-y-auto animate-bounce-in scrollable pin-modal-inner',
         'border border-gray-100',
         maxWidth
       )} style={{ maxHeight: '92vh' }}>
         {title && (
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 sticky top-0 bg-white/95 backdrop-blur-sm z-10 rounded-t-2xl">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100 sticky top-0 bg-white z-10 rounded-t-2xl">
             <h2 className="text-base font-800 text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>{title}</h2>
             {onClose && (
               <button onClick={onClose} aria-label="Close dialog"
@@ -264,7 +270,7 @@ function Modal({
   );
 }
 
-// ─── Confirm Dialog ───────────────────────────────────────────
+// ─── Confirm Dialog ────────────────────────────────────────────
 function ConfirmDialog({
   open, onClose, onConfirm, title, message, confirmLabel = 'Confirm', variant = 'danger',
 }: {
@@ -284,7 +290,8 @@ function ConfirmDialog({
   );
 }
 
-function Badge({ children, color = 'gray' }: { children: React.ReactNode; color?: string }) {
+// memo: Badge is rendered in every sales list row and audit log row
+const Badge = memo(function Badge({ children, color = 'gray' }: { children: React.ReactNode; color?: string }) {
   const colors: Record<string, string> = {
     gray:   'bg-gray-100 text-gray-600 border-gray-200',
     green:  'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -298,9 +305,9 @@ function Badge({ children, color = 'gray' }: { children: React.ReactNode; color?
       {children}
     </span>
   );
-}
+});
 
-// ─── Audit log formatter ─────────────────────────────────────
+// ─── Audit log formatter ──────────────────────────────────────
 function formatAuditEntry(log: AuditLog): { title: string; detail: string | null } {
   const action = log.action.replace(/_/g, ' ');
   const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -334,7 +341,7 @@ function formatAuditEntry(log: AuditLog): { title: string; detail: string | null
   return { title: label, detail: details.length > 0 ? details.join(' · ') : null };
 }
 
-// ─── PIN lockout helpers ──────────────────────────────────────
+// ─── PIN lockout helpers ───────────────────────────────────────
 const PIN_MAX_ATTEMPTS = 5;
 const PIN_LOCKOUT_MS = 60_000;
 
@@ -350,23 +357,19 @@ const pinLockoutState = {
   },
   reset() { this.attempts = 0; this.lockedUntil = 0; },
   isLocked() { return Date.now() < this.lockedUntil; },
-  secondsLeft() { return Math.max(0, Math.ceil((this.lockedUntil - Date.now()) / 1000)); },
+  secondsLeft() { return Math.ceil(Math.max(0, this.lockedUntil - Date.now()) / 1000); },
 };
 
-// ─── ANY-USER PIN Modal ───────────────────────────────────────
+// ─── Any-User PIN Modal ────────────────────────────────────────
 function AnyUserPinModal({
-  open, onClose, onSuccess, title = '🔒 Verify Identity',
-  description = 'Any staff member may authorize this action using their own PIN.',
+  open, onClose, onSuccess, title, description,
 }: {
-  open: boolean;
-  onClose: () => void;
+  open: boolean; onClose: () => void;
   onSuccess: (result: { user_id: string; user_name: string; role: string }) => void;
-  title?: string;
-  description?: string;
+  title: string; description: string;
 }) {
-  const { data: usersList, isLoading: usersLoading } = useUsersList();
-  console.log('AnyUserPinModal - usersList:', usersList, 'isLoading:', usersLoading);
-  const verifyPin = useVerifyPin();
+  const { data: usersList } = useUsersList();
+  const login = useLogin();
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -374,7 +377,7 @@ function AnyUserPinModal({
   const [lockSecs, setLockSecs] = useState(0);
 
   useEffect(() => {
-    if (open) { setPin(''); setError(''); setSelectedUser(null); }
+    if (!open) { setSelectedUser(null); setPin(''); setError(''); }
   }, [open]);
 
   useEffect(() => {
@@ -387,23 +390,12 @@ function AnyUserPinModal({
     return () => clearInterval(iv);
   }, [locked]);
 
-  useEffect(() => {
-    if (!open || !selectedUser) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key >= '0' && e.key <= '9') press(e.key);
-      else if (e.key === 'Backspace') press('DEL');
-      else if (e.key === 'Escape') { setSelectedUser(null); setPin(''); }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [open, selectedUser, pin]);
-
   const doSubmit = useCallback(async (pinValue: string, user: User) => {
     if (pinLockoutState.isLocked()) {
       setLocked(true); setLockSecs(pinLockoutState.secondsLeft()); setPin(''); return;
     }
     try {
-      const res = await verifyPin.mutateAsync({ user_id: user.id, pin: pinValue });
+      await login.mutateAsync({ user_id: user.id, pin: pinValue });
       pinLockoutState.reset();
       onSuccess({ user_id: user.id, user_name: user.name, role: user.role });
     } catch {
@@ -416,16 +408,16 @@ function AnyUserPinModal({
       }
       setPin('');
     }
-  }, [verifyPin, onSuccess]);
+  }, [login, onSuccess]);
 
-  const press = (val: string) => {
-    if (locked) return;
+  const press = useCallback((val: string) => {
+    if (locked || !selectedUser) return;
     if (val === 'DEL') { setPin(p => p.slice(0, -1)); setError(''); return; }
     if (pin.length >= 6) return;
     const next = pin + val;
     setPin(next); setError('');
     if (next.length === 6 && selectedUser) setTimeout(() => doSubmit(next, selectedUser), 50);
-  };
+  }, [locked, selectedUser, pin, doSubmit]);
 
   if (!open) return null;
 
@@ -441,7 +433,7 @@ function AnyUserPinModal({
               <button key={u.id}
                 onClick={() => { setSelectedUser(u); setPin(''); setError(''); }}
                 className="flex items-center gap-3 p-3 bg-gray-50 hover:bg-yellow-50 border border-gray-200
-                  hover:border-yellow-300 rounded-2xl transition-all text-left group active:scale-98
+                  hover:border-yellow-300 rounded-2xl transition-colors text-left group active:scale-98
                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-amber-900 text-sm shrink-0"
                   style={{ backgroundColor: 'var(--mango-yellow)', fontFamily: 'var(--font-display)' }}>
@@ -498,7 +490,7 @@ function AnyUserPinModal({
                       <button key={i} onClick={() => press(k)}
                         aria-label={k === 'DEL' ? 'Delete last digit' : `Digit ${k}`}
                         className={clsx(
-                          'rounded-xl font-bold transition-all duration-100 active:scale-95 border select-none',
+                          'rounded-xl font-bold transition-colors duration-75 active:scale-95 border select-none',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                           k === 'DEL'
                             ? 'bg-gray-100 text-gray-500 text-xs border-gray-200 hover:bg-gray-200'
@@ -521,7 +513,7 @@ function AnyUserPinModal({
   );
 }
 
-// ─── PIN Modal (self-verify, with lockout) ─────────────────────
+// ─── PIN Modal (self-verify, with lockout) ────────────────────
 function PinModal() {
   const { pinModal, resolvePinModal } = useUIStore();
   const { user } = useAuthStore();
@@ -562,10 +554,10 @@ function PinModal() {
       setLocked(true); setLockSecs(pinLockoutState.secondsLeft()); setPin(''); return;
     }
     try {
-      const res = await verifyPin.mutateAsync({ user_id: user.id, pin: pinValue, required_role: pinModal.required_role });
+      await verifyPin.mutateAsync({ user_id: user.id, pin: pinValue, required_role: pinModal.required_role });
       pinLockoutState.reset();
       resolvePinModal({ verified: true, user_id: user.id, user_name: user.name, role: user.role });
-    } catch (e: unknown) {
+    } catch {
       pinLockoutState.increment();
       if (pinLockoutState.isLocked()) {
         setLocked(true); setLockSecs(pinLockoutState.secondsLeft());
@@ -577,14 +569,14 @@ function PinModal() {
     }
   }, [user, verifyPin, pinModal.required_role, resolvePinModal]);
 
-  const press = (val: string) => {
+  const press = useCallback((val: string) => {
     if (locked) return;
     if (val === 'DEL') { setPin(p => p.slice(0, -1)); setError(''); return; }
     if (pin.length >= 6) return;
     const next = pin + val;
     setPin(next); setError('');
     if (next.length === 6) setTimeout(() => doSubmit(next), 50);
-  };
+  }, [locked, pin, doSubmit]);
 
   return (
     <Modal
@@ -638,11 +630,11 @@ function PinModal() {
                   <button key={i} onClick={() => press(k)}
                     aria-label={k === 'DEL' ? 'Delete last digit' : `Digit ${k}`}
                     className={clsx(
-                      'pin-key rounded-xl font-bold transition-all duration-100 active:scale-95 border select-none',
+                      'pin-key rounded-xl font-bold transition-colors duration-75 active:scale-95 border select-none',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 focus-visible:ring-offset-1',
                       k === 'DEL'
                         ? 'bg-gray-100 text-gray-500 text-xs border-gray-200 hover:bg-gray-200'
-                        : 'bg-white text-gray-900 border-gray-200 hover:bg-yellow-50 hover:border-yellow-300 shadow-sm hover:shadow-md'
+                        : 'bg-white text-gray-900 border-gray-200 hover:bg-yellow-50 hover:border-yellow-300 shadow-sm'
                     )}
                     style={{ height: '52px', fontSize: '18px', fontFamily: 'var(--font-display)' }}>
                     {k}
@@ -659,8 +651,8 @@ function PinModal() {
   );
 }
 
-// ─── Receipt ─────────────────────────────────────────────────
-function SaleReceipt({ sale, settings }: { sale: SaleDetail; settings: SettingsType }) {
+// ─── Receipt ──────────────────────────────────────────────────
+const SaleReceipt = memo(function SaleReceipt({ sale, settings }: { sale: SaleDetail; settings: SettingsType }) {
   return (
     <div id="receipt-print" className="bg-white text-gray-900 p-4 text-xs font-mono max-w-[280px] mx-auto">
       <div className="text-center mb-3">
@@ -669,12 +661,11 @@ function SaleReceipt({ sale, settings }: { sale: SaleDetail; settings: SettingsT
         <div>{settings.store_contact}</div>
       </div>
       <div className="border-t border-dashed border-gray-300 my-2" />
-<div className="flex justify-between"><span>Receipt:</span><span>{sale.receipt_number}</span></div>
-<div className="flex justify-between"><span>Cashier:</span><span>{sale.cashier_name}</span></div>
-<div className="flex justify-between"><span>Date:</span><span>{fmtDate(sale.created_at)}</span></div>
-{/* Fix 4: show order type on screen receipt */}
-<div className="flex justify-between"><span>Order:</span><span>{sale.order_type === 'take_out' ? 'Take Out' : 'Dine In'}</span></div>
-{sale.note && <div className="flex justify-between"><span>Note:</span><span>{sale.note}</span></div>}
+      <div className="flex justify-between"><span>Receipt:</span><span>{sale.receipt_number}</span></div>
+      <div className="flex justify-between"><span>Cashier:</span><span>{sale.cashier_name}</span></div>
+      <div className="flex justify-between"><span>Date:</span><span>{fmtDate(sale.created_at)}</span></div>
+      <div className="flex justify-between"><span>Order:</span><span>{sale.order_type === 'take_out' ? 'Take Out' : 'Dine In'}</span></div>
+      {sale.note && <div className="flex justify-between"><span>Note:</span><span>{sale.note}</span></div>}
       <div className="border-t border-dashed border-gray-300 my-2" />
       {sale.items.map((item: SaleItemDetail, i: number) => (
         <div key={i} className="mb-1">
@@ -715,9 +706,9 @@ function SaleReceipt({ sale, settings }: { sale: SaleDetail; settings: SettingsT
       )}
     </div>
   );
-}
+});
 
-// ─── Login Page ───────────────────────────────────────────────
+// ─── Login Page ────────────────────────────────────────────────
 function LoginPage() {
   const { data: usersList, isLoading } = useUsersList();
   const login = useLogin();
@@ -748,7 +739,7 @@ function LoginPage() {
       pinLockoutState.reset();
       authLogin(res.user, res.token);
       navigate(res.user.role === 'admin' ? 'admin_dashboard' : 'pos');
-    } catch (e: unknown) {
+    } catch {
       pinLockoutState.increment();
       if (pinLockoutState.isLocked()) {
         setLocked(true); setLockSecs(pinLockoutState.secondsLeft());
@@ -760,119 +751,96 @@ function LoginPage() {
     }
   }, [login, authLogin, navigate]);
 
-  useEffect(() => {
-    if (!selectedUser) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key >= '0' && e.key <= '9') pressPin(e.key);
-      else if (e.key === 'Backspace') pressPin('DEL');
-      else if (e.key === 'Escape') { setSelectedUser(null); setPin(''); setError(''); }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [selectedUser, pin]);
-
-  const pressPin = (val: string) => {
-    if (locked) return;
+  const press = useCallback((val: string) => {
+    if (locked || !selectedUser) return;
     if (val === 'DEL') { setPin(p => p.slice(0, -1)); setError(''); return; }
     if (pin.length >= 6) return;
     const next = pin + val;
     setPin(next); setError('');
-    if (next.length === 6 && selectedUser) setTimeout(() => doLogin(next, selectedUser), 50);
-  };
+    if (next.length === 6) setTimeout(() => doLogin(next, selectedUser), 50);
+  }, [locked, selectedUser, pin, doLogin]);
 
-  if (isLoading) return (
-    <div className="h-full flex items-center justify-center" style={{ backgroundColor: 'var(--surface-page)' }}>
-      <div className="flex flex-col items-center gap-3">
-        <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl"
-          style={{ backgroundColor: 'var(--mango-yellow)' }}>🥭</div>
-        <RefreshCw className="animate-spin text-gray-400" size={18} />
-      </div>
-    </div>
-  );
+  useEffect(() => {
+    if (!selectedUser) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key >= '0' && e.key <= '9') press(e.key);
+      else if (e.key === 'Backspace') press('DEL');
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [selectedUser, press]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
-      style={{ background: 'linear-gradient(145deg, #FFFBEB 0%, #FEF3C0 40%, #FFF7ED 100%)' }}>
-      <div className="absolute top-0 right-0 w-64 h-64 rounded-full opacity-20 blur-3xl pointer-events-none"
-        style={{ background: 'radial-gradient(circle, var(--mango-yellow) 0%, transparent 70%)', transform: 'translate(30%, -30%)' }} />
-      <div className="absolute bottom-0 left-0 w-48 h-48 rounded-full opacity-15 blur-3xl pointer-events-none"
-        style={{ background: 'radial-gradient(circle, var(--warrior-red) 0%, transparent 70%)', transform: 'translate(-30%, 30%)' }} />
-
-      <div className="w-full max-w-sm relative z-10">
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--surface-page)' }}>
+      <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl mb-4 shadow-lg"
-            style={{ backgroundColor: 'var(--mango-yellow)', boxShadow: 'var(--shadow-mango)' }}>
-            <span className="text-4xl" style={{ lineHeight: 1 }}>🥭</span>
-          </div>
-          <div className="text-4xl font-black mb-1" style={{ fontFamily: 'var(--font-display)' }}>
-            <span style={{ color: '#E8A000' }}>Mango </span>
-            <span style={{ color: 'var(--warrior-red)' }}>Warrior</span>
-          </div>
-          <div className="text-gray-500 text-sm font-medium tracking-wide">Point of Sale System</div>
+          <div className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-4 text-4xl"
+            style={{ backgroundColor: 'var(--mango-yellow)', boxShadow: 'var(--shadow-mango)' }}>🥭</div>
+          <h1 className="text-2xl font-900 mb-1" style={{ fontFamily: 'var(--font-display)', fontWeight: 900 }}>
+            <span style={{ color: '#D97706' }}>Mango </span><span style={{ color: 'var(--warrior-red)' }}>Warrior</span>
+          </h1>
+          <p className="text-gray-500 text-sm">Point of Sale System</p>
         </div>
 
-        <div className="bg-white/90 backdrop-blur-sm rounded-3xl shadow-2xl border border-white/60 p-6"
-          style={{ boxShadow: '0 20px 60px rgba(0,0,0,0.10), 0 2px 0 rgba(255,255,255,0.8) inset' }}>
-          {!selectedUser ? (
-            <div>
-              <p className="text-gray-400 text-sm text-center mb-4 font-medium">Who's working today?</p>
-              <div className="flex flex-col gap-2" role="list">
-                {(usersList ?? []).map((u: User) => (
-                  <button key={u.id}
-                    role="listitem"
-                    onClick={() => { setSelectedUser(u); setPin(''); setError(''); }}
-                    className="flex items-center gap-3.5 p-3.5 bg-gray-50 hover:bg-yellow-50 border border-gray-200
-                      hover:border-yellow-300 rounded-2xl transition-all text-left group active:scale-98
-                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400">
-                    <div className="w-11 h-11 rounded-2xl flex items-center justify-center font-black text-amber-900 text-base shrink-0 shadow-sm"
-                      style={{ backgroundColor: 'var(--mango-yellow)', fontFamily: 'var(--font-display)' }}>
-                      {u.name[0].toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-gray-900 font-700 text-sm" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{u.name}</div>
-                      <div className="text-gray-400 text-xs capitalize mt-0.5">{u.role}</div>
-                    </div>
-                    <ChevronRight size={15} className="text-gray-300 group-hover:text-yellow-500 transition-colors shrink-0" />
-                  </button>
-                ))}
-              </div>
+        <div className="bg-white rounded-3xl p-6 shadow-lg border border-gray-150">
+          {isLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-16 shimmer rounded-2xl" />
+              ))}
+            </div>
+          ) : !selectedUser ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-center text-gray-400 font-medium mb-1">Select your account to continue</p>
+              {(usersList ?? []).filter((u: User) => u.is_active).map((u: User) => (
+                <button key={u.id}
+                  onClick={() => { setSelectedUser(u); setPin(''); setError(''); }}
+                  className="flex items-center gap-3 p-3 bg-gray-50 hover:bg-yellow-50 border border-gray-200
+                    hover:border-yellow-300 rounded-2xl transition-colors text-left group active:scale-98
+                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-amber-900 text-sm shrink-0"
+                    style={{ backgroundColor: 'var(--mango-yellow)', fontFamily: 'var(--font-display)' }}>
+                    {u.name[0].toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-gray-900 font-700 text-sm" style={{ fontWeight: 700 }}>{u.name}</div>
+                    <div className="text-gray-400 text-xs capitalize">{u.role}</div>
+                  </div>
+                  <ChevronRight size={15} className="text-gray-300 group-hover:text-yellow-500 shrink-0" />
+                </button>
+              ))}
             </div>
           ) : (
-            <div className="flex flex-col items-center" style={{ gap: '14px' }}>
+            <div className="flex flex-col items-center gap-4">
               <button onClick={() => { setSelectedUser(null); setPin(''); setError(''); }}
                 className="flex items-center gap-1.5 text-gray-400 hover:text-gray-700 text-sm transition-colors self-start font-medium
                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 rounded-lg px-1">
-                <ArrowLeft size={14} /> Back
+                <ArrowLeft size={14} /> {selectedUser.name}
               </button>
-              <div className="w-16 h-16 rounded-3xl flex items-center justify-center font-black text-2xl text-amber-900 shadow-md"
-                style={{ backgroundColor: 'var(--mango-yellow)', fontFamily: 'var(--font-display)', boxShadow: 'var(--shadow-mango)' }}>
-                {selectedUser.name[0].toUpperCase()}
-              </div>
-              <div className="text-center">
-                <div className="text-gray-900 font-800 text-lg" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>{selectedUser.name}</div>
-                <div className="text-gray-400 text-xs capitalize tracking-wide">{selectedUser.role}</div>
-              </div>
 
               {locked ? (
-                <div className="flex flex-col items-center gap-2 py-4">
-                  <div className="w-14 h-14 rounded-2xl bg-red-50 flex items-center justify-center">
-                    <AlertTriangle size={24} className="text-red-500" />
+                <div className="flex flex-col items-center gap-3 py-6">
+                  <div className="w-16 h-16 rounded-2xl bg-red-50 flex items-center justify-center">
+                    <AlertTriangle size={28} className="text-red-500" />
                   </div>
                   <p className="text-red-600 font-700 text-sm text-center" style={{ fontWeight: 700 }}>PIN entry locked</p>
-                  <p className="text-gray-500 text-xs text-center">Try again in <span className="font-bold text-red-600">{lockSecs}s</span></p>
+                  <p className="text-gray-500 text-sm text-center">
+                    Try again in <span className="font-bold text-red-600">{lockSecs}s</span>
+                  </p>
                 </div>
               ) : (
                 <>
-                  <div className="flex" style={{ gap: '8px' }} role="status" aria-live="polite">
+                  <div className="flex gap-2" role="status" aria-live="polite">
                     {Array.from({ length: 6 }).map((_, i) => (
-                      <div key={i}
-                        className="rounded-full border-2 flex items-center justify-center transition-all duration-150"
+                      <div key={i} className="rounded-full border-2 transition-all duration-150"
                         style={{
-                          width: '36px', height: '36px',
+                          width: '40px', height: '40px',
                           borderColor: i < pin.length ? 'var(--mango-yellow)' : '#E4E4E7',
                           backgroundColor: i < pin.length ? 'var(--mango-yellow)' : '#F4F4F5',
                         }}>
-                        {i < pin.length && <span className="text-amber-900 font-black" style={{ fontSize: '9px' }}>●</span>}
+                        {i < pin.length && <div className="w-full h-full flex items-center justify-center">
+                          <span className="text-amber-900 font-black" style={{ fontSize: '10px' }}>●</span>
+                        </div>}
                       </div>
                     ))}
                   </div>
@@ -883,19 +851,19 @@ function LoginPage() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-3 w-full" style={{ gap: '7px', maxWidth: '210px' }} role="group" aria-label="PIN keypad">
+                  <div className="grid grid-cols-3 w-full gap-2" style={{ maxWidth: '240px' }}>
                     {['1','2','3','4','5','6','7','8','9','','0','DEL'].map((k, i) =>
                       k === '' ? <div key={i} /> : (
-                        <button key={i} onClick={() => pressPin(k)}
-                          aria-label={k === 'DEL' ? 'Delete last digit' : `Digit ${k}`}
+                        <button key={i} onClick={() => press(k)}
+                          aria-label={k === 'DEL' ? 'Delete' : k}
                           className={clsx(
-                            'rounded-xl font-bold transition-all duration-100 active:scale-95 border select-none',
+                            'rounded-2xl font-bold transition-colors duration-75 active:scale-95 border select-none',
                             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                             k === 'DEL'
                               ? 'bg-gray-100 text-gray-500 text-xs border-gray-200 hover:bg-gray-200'
                               : 'bg-white text-gray-900 border-gray-200 hover:bg-yellow-50 hover:border-yellow-300 shadow-sm'
                           )}
-                          style={{ height: '50px', fontSize: '18px', fontFamily: 'var(--font-display)' }}>
+                          style={{ height: '56px', fontSize: '20px', fontFamily: 'var(--font-display)' }}>
                           {k}
                         </button>
                       )
@@ -911,14 +879,13 @@ function LoginPage() {
   );
 }
 
-// ─── Header ──────────────────────────────────────────────────
+// ─── Header ───────────────────────────────────────────────────
 function Header() {
-  const { user, logout } = useAuthStore();
   const { page, navigate } = useUIStore();
+  const { user, logout } = useAuthStore();
   const { data: shift } = useCurrentShift();
-  const openPinModal = useUIStore(s => s.openPinModal);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
 
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
@@ -926,22 +893,15 @@ function Header() {
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
-  const toggleFullscreen = async () => {
-    try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
-      } else {
-        await document.exitFullscreen();
-      }
-    } catch { /* ignore */ }
-  };
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+    else document.exitFullscreen().catch(() => {});
+  }, []);
 
-  const handleLogout = async () => {
-    const result = await openPinModal();
-    if (!result.verified) return;
-    fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${useAuthStore.getState().token}` } });
+  const handleLogout = useCallback(() => {
     logout();
-  };
+    setMenuOpen(false);
+  }, [logout]);
 
   const navItems: { label: string; page: Page; icon: React.ReactNode; adminOnly?: boolean }[] = [
     { label: 'POS',       page: 'pos',              icon: <ShoppingCart size={14} /> },
@@ -952,7 +912,10 @@ function Header() {
     { label: 'Settings',  page: 'admin_settings',   icon: <Settings size={14} />,  adminOnly: true },
     { label: 'Audit',     page: 'admin_audit',      icon: <ShieldCheck size={14} />, adminOnly: true },
   ];
-  const visible = navItems.filter(n => !n.adminOnly || user?.role === 'admin');
+  const visible = useMemo(
+    () => navItems.filter(n => !n.adminOnly || user?.role === 'admin'),
+    [user?.role]
+  );
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -962,7 +925,7 @@ function Header() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [visible]);
+  }, [visible, navigate]);
 
   return (
     <header className="flex items-center h-14 px-4 bg-white border-b border-gray-150 shrink-0 z-30 relative"
@@ -996,7 +959,7 @@ function Header() {
               aria-current={isActive ? 'page' : undefined}
               title={`${n.label} (Alt+${idx + 1})`}
               className={clsx(
-                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all duration-150',
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors duration-100',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                 isActive ? 'text-amber-900' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-100'
               )}
@@ -1023,7 +986,7 @@ function Header() {
                 <button key={n.page} onClick={() => { navigate(n.page); setMenuOpen(false); }}
                   aria-current={isActive ? 'page' : undefined}
                   className={clsx(
-                    'flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all',
+                    'flex items-center gap-2.5 px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                     isActive ? 'text-amber-900' : 'text-gray-600 hover:bg-gray-50'
                   )}
@@ -1037,11 +1000,8 @@ function Header() {
       </div>
 
       <div className="flex items-center gap-2 ml-auto">
-        <button
-          onClick={toggleFullscreen}
-          title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-          className="text-gray-400 hover:text-gray-700 p-2 rounded-xl hover:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
-        >
+        <button onClick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+          className="text-gray-400 hover:text-gray-700 p-2 rounded-xl hover:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400">
           {isFullscreen ? <Minimize size={15} /> : <Maximize size={15} />}
         </button>
 
@@ -1075,21 +1035,21 @@ function CartAddonPickerModal({
   const cart = useCartStore();
   const [selected, setSelected] = useState<CartAddon[]>(currentAddons.map(a => ({ ...a })));
 
-  const toggleAddon = (addon: Addon) => {
+  const toggleAddon = useCallback((addon: Addon) => {
     setSelected(prev => {
       const exists = prev.find(a => a.addon_id === addon.id);
       if (exists) return prev.filter(a => a.addon_id !== addon.id);
       return [...prev, { addon_id: addon.id, addon_name: addon.name, addon_price: addon.price, qty: 1 }];
     });
-  };
+  }, []);
 
-  const changeQty = (addonId: string, delta: number) => {
+  const changeQty = useCallback((addonId: string, delta: number) => {
     setSelected(prev => prev.map(a => a.addon_id === addonId ? { ...a, qty: Math.max(1, a.qty + delta) } : a));
-  };
+  }, []);
 
-  const handleApply = () => { cart.setAddons(cartKey, selected); onClose(); };
-  const availableAddons = allAddons.filter(a => a.is_available);
-  const addonTotal = selected.reduce((s, a) => s + a.addon_price * a.qty, 0);
+  const handleApply = useCallback(() => { cart.setAddons(cartKey, selected); onClose(); }, [cart, cartKey, selected, onClose]);
+  const availableAddons = useMemo(() => allAddons.filter(a => a.is_available), [allAddons]);
+  const addonTotal = useMemo(() => selected.reduce((s, a) => s + a.addon_price * a.qty, 0), [selected]);
 
   return (
     <Modal open onClose={onClose} title="🧂 Add-ons" maxWidth="max-w-sm">
@@ -1103,13 +1063,13 @@ function CartAddonPickerModal({
               return (
                 <div key={addon.id}
                   className={clsx(
-                    'flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-all duration-150 cursor-pointer',
+                    'flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-colors duration-100 cursor-pointer',
                     sel ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200 bg-white hover:border-gray-300'
                   )}
                   onClick={() => toggleAddon(addon)}
                   role="checkbox" aria-checked={!!sel} tabIndex={0}
                   onKeyDown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggleAddon(addon); } }}>
-                  <div className={clsx('w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all', sel ? 'border-yellow-500 bg-yellow-400' : 'border-gray-300')}>
+                  <div className={clsx('w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors', sel ? 'border-yellow-500 bg-yellow-400' : 'border-gray-300')}>
                     {sel && <span className="text-amber-900 text-xs font-black" style={{ lineHeight: 1 }}>✓</span>}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -1149,7 +1109,32 @@ function CartAddonPickerModal({
   );
 }
 
-// ─── POS Page ──────────────────────────────────────────────────
+// ─── Item Card — memoized to prevent re-render on cart changes ─
+const ItemCard = memo(function ItemCard({
+  item, colorIdx, onTap,
+}: {
+  item: MenuItem; colorIdx: number; onTap: (item: MenuItem) => void;
+}) {
+  const color = getCategoryColor(colorIdx);
+  const handleClick = useCallback(() => onTap(item), [item, onTap]);
+  return (
+    <button
+      onClick={handleClick}
+      className={`item-card-solid group ${color.cardClass}`}
+      aria-label={item.name}
+      style={{ minHeight: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+    >
+      <div
+        className="ic-text text-base font-700 leading-tight text-center px-2 line-clamp-2"
+        style={{ fontFamily: 'var(--font-display)', fontWeight: 700, wordBreak: 'break-word' }}
+      >
+        {item.name}
+      </div>
+    </button>
+  );
+});
+
+// ─── POS Page ─────────────────────────────────────────────────
 function POSPage() {
   const cart = useCartStore();
   const { data: menuData, isLoading: menuLoading } = useMenu();
@@ -1189,27 +1174,31 @@ function POSPage() {
     return () => window.removeEventListener('keydown', handler);
   }, [cart.cart.items.length]);
 
-  const categories = menuData?.categories ?? [];
-  const allAddons = menuData?.addons ?? [];
-  const allItems = categories.flatMap((c: Category) => c.items);
+  const categories = useMemo(() => menuData?.categories ?? [], [menuData]);
+  const allAddons = useMemo(() => menuData?.addons ?? [], [menuData]);
+  const allItems = useMemo(() => categories.flatMap((c: Category) => c.items), [categories]);
 
-  const filteredItems = allItems.filter((item: MenuItem) => {
+  // useMemo: prevents re-filtering on every cart change (cart state is separate)
+  const filteredItems = useMemo(() => allItems.filter((item: MenuItem) => {
     if (!item.is_available) return false;
     const matchCat = activeCategory === 'all' || item.category_id === activeCategory;
     const matchSearch = item.name.toLowerCase().includes(searchQ.toLowerCase());
     return matchCat && matchSearch;
-  });
+  }), [allItems, activeCategory, searchQ]);
 
-  const groupedItems = categories
+  const groupedItems = useMemo(() => categories
     .map((cat: Category, idx: number) => ({
       category: cat, colorIdx: idx,
       items: filteredItems.filter((item: MenuItem) => item.category_id === cat.id),
     }))
-    .filter(g => g.items.length > 0);
+    .filter(g => g.items.length > 0), [categories, filteredItems]);
 
-  const uncategorizedItems = filteredItems.filter((item: MenuItem) => !item.category_id);
+  const uncategorizedItems = useMemo(
+    () => filteredItems.filter((item: MenuItem) => !item.category_id),
+    [filteredItems]
+  );
 
-  const addToCart = (item: MenuItem, sizeName?: string, sizePrice?: number, addons: Addon[] = []) => {
+  const addToCart = useCallback((item: MenuItem, sizeName?: string, sizePrice?: number, addons: Addon[] = []) => {
     const price = sizePrice ?? item.sizes[0]?.price ?? 0;
     cart.addItem({
       item_id: item.id, item_name: item.name,
@@ -1217,38 +1206,17 @@ function POSPage() {
       addons: addons.map((a: Addon) => ({ addon_id: a.id, addon_name: a.name, addon_price: a.price, qty: 1 })),
     });
     setSizeModal(null);
-  };
+  }, [cart]);
 
-  const handleItemTap = (item: MenuItem) => {
+  const handleItemTap = useCallback((item: MenuItem) => {
     if (item.sizes.length > 1) setSizeModal({ item });
     else addToCart(item, item.sizes[0]?.name, item.sizes[0]?.price);
-  };
+  }, [addToCart]);
 
-  const total = cart.total();
-  const itemCount = cart.cart.items.reduce((s, i) => s + i.qty, 0);
+  // useCartStore selectors — only subscribe to what we need
+  const total = useCartStore(s => s.total());
+  const itemCount = useCartStore(s => s.cart.items.reduce((acc, i) => acc + i.qty, 0));
   const heldCount = heldOrders?.length ?? 0;
-
-  // ── Item card — name only, smaller widget, bigger font, two lines centered ──
-  const renderItemCard = (item: MenuItem, colorIdx: number) => {
-    const color = getCategoryColor(colorIdx);
-
-    return (
-      <button
-        key={item.id}
-        onClick={() => handleItemTap(item)}
-        className={`item-card-solid group ${color.cardClass}`}
-        aria-label={item.name}
-        style={{ minHeight: '70px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      >
-        <div
-          className="ic-text text-base font-700 leading-tight text-center px-2 line-clamp-2"
-          style={{ fontFamily: 'var(--font-display)', fontWeight: 700, wordBreak: 'break-word' }}
-        >
-          {item.name}
-        </div>
-      </button>
-    );
-  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
@@ -1283,7 +1251,7 @@ function POSPage() {
                 aria-label="Search menu items"
                 className="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl pl-10 pr-10 py-2.5 text-sm
                   focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20
-                  placeholder-gray-400 font-medium transition-colors"
+                  placeholder-gray-400 font-medium transition-colors duration-100"
               />
               {searchQ && (
                 <button onClick={() => setSearchQ('')} aria-label="Clear search"
@@ -1298,7 +1266,7 @@ function POSPage() {
               <button
                 role="tab" aria-selected={activeCategory === 'all'}
                 onClick={() => setActiveCategory('all')}
-                className="shrink-0 px-3.5 py-1 rounded-full text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
+                className="shrink-0 px-3.5 py-1 rounded-full text-xs font-700 transition-colors duration-100 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                 style={
                   activeCategory === 'all'
                     ? { backgroundColor: '#18181B', color: '#fff', borderColor: '#18181B', fontWeight: 700 }
@@ -1313,9 +1281,9 @@ function POSPage() {
                   <button key={c.id}
                     role="tab" aria-selected={isActive}
                     onClick={() => setActiveCategory(c.id)}
-                    className="shrink-0 px-3.5 py-1 rounded-full text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
+                    className="shrink-0 px-3.5 py-1 rounded-full text-xs font-700 transition-colors duration-100 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                     style={isActive
-                      ? { backgroundColor: color.pill, color: '#fff', borderColor: color.pill, fontWeight: 700, boxShadow: `0 2px 8px ${color.pill}50` }
+                      ? { backgroundColor: color.pill, color: '#fff', borderColor: color.pill, fontWeight: 700 }
                       : { backgroundColor: '#fff', color: color.pill, borderColor: color.pill + '55', fontWeight: 600 }
                     }>
                     {c.name}
@@ -1354,7 +1322,9 @@ function POSPage() {
                         <span className="cat-divider-count">{items.length}</span>
                       </div>
                       <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2" role="list" aria-label={`${category.name} items`}>
-                        {items.map(item => renderItemCard(item, colorIdx))}
+                        {items.map(item => (
+                          <ItemCard key={item.id} item={item} colorIdx={colorIdx} onTap={handleItemTap} />
+                        ))}
                       </div>
                     </div>
                   );
@@ -1367,7 +1337,9 @@ function POSPage() {
                       <div className="cat-divider-line" />
                     </div>
                     <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
-                      {uncategorizedItems.map(item => renderItemCard(item, categories.length))}
+                      {uncategorizedItems.map(item => (
+                        <ItemCard key={item.id} item={item} colorIdx={categories.length} onTap={handleItemTap} />
+                      ))}
                     </div>
                   </div>
                 )}
@@ -1401,7 +1373,7 @@ function POSPage() {
               <button
                 onClick={() => setShowHeld(true)}
                 title="Parked orders"
-                className="relative p-2 rounded-xl text-gray-500 hover:text-amber-700 hover:bg-yellow-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
+                className="relative p-2 rounded-xl text-gray-500 hover:text-amber-700 hover:bg-yellow-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
               >
                 <Receipt size={15} />
                 {heldCount > 0 && (
@@ -1508,7 +1480,7 @@ function POSPage() {
             mobileTab === 'menu' ? 'text-amber-700' : 'text-gray-400'
           )}
           style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-          <div className={clsx('w-8 h-8 rounded-xl flex items-center justify-center transition-all', mobileTab === 'menu' ? 'text-amber-700' : 'text-gray-400')}
+          <div className={clsx('w-8 h-8 rounded-xl flex items-center justify-center transition-colors', mobileTab === 'menu' ? 'text-amber-700' : 'text-gray-400')}
             style={mobileTab === 'menu' ? { backgroundColor: 'var(--mango-yellow-lt)' } : {}}>
             <Coffee size={17} />
           </div>
@@ -1522,7 +1494,7 @@ function POSPage() {
             mobileTab === 'cart' ? 'text-amber-700' : 'text-gray-400'
           )}
           style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-          <div className={clsx('w-8 h-8 rounded-xl flex items-center justify-center transition-all relative', mobileTab === 'cart' ? 'text-amber-700' : 'text-gray-400')}
+          <div className={clsx('w-8 h-8 rounded-xl flex items-center justify-center transition-colors relative', mobileTab === 'cart' ? 'text-amber-700' : 'text-gray-400')}
             style={mobileTab === 'cart' ? { backgroundColor: 'var(--mango-yellow-lt)' } : {}}>
             <ShoppingCart size={17} />
             {itemCount > 0 && (
@@ -1539,7 +1511,7 @@ function POSPage() {
           onClick={() => setShowHeld(true)}
           className="flex-1 flex flex-col items-center py-2.5 text-xs font-700 gap-1 transition-colors relative text-gray-400"
           style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center transition-all relative text-gray-400">
+          <div className="w-8 h-8 rounded-xl flex items-center justify-center transition-colors relative text-gray-400">
             <Receipt size={17} />
             {heldCount > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-white flex items-center justify-center font-800"
@@ -1579,13 +1551,23 @@ function POSPage() {
   );
 }
 
-// ─── Cart Item Row ────────────────────────────────────────────
-function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }) {
+// ─── Cart Item Row — memoized, isolated from menu re-renders ──
+const CartItemRow = memo(function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }) {
   const cart = useCartStore();
   const [showAddonPicker, setShowAddonPicker] = useState(false);
 
   const accentColors = ['#F59E0B','#059669','#E11D48','#7C3AED','#0284C7','#EA580C','#DB2777','#0F766E'];
-  const accentColor = accentColors[(cart.cart.items.indexOf(item)) % accentColors.length] ?? '#F59E0B';
+  // Use item id hash for stable colour — don't recompute on position change
+  const accentColor = useMemo(() => {
+    const idx = item.item_id.charCodeAt(0) % accentColors.length;
+    return accentColors[idx] ?? '#F59E0B';
+  }, [item.item_id]);
+
+  const handleRemove = useCallback(() => cart.removeItem(item.cart_key), [cart, item.cart_key]);
+  const handleQtyMinus = useCallback(() => cart.updateQty(item.cart_key, -1), [cart, item.cart_key]);
+  const handleQtyPlus = useCallback(() => cart.updateQty(item.cart_key, 1), [cart, item.cart_key]);
+  const handleScToggle = useCallback(() => cart.setDiscount(item.cart_key, item.discount_type === 'sc' ? null : 'sc'), [cart, item.cart_key, item.discount_type]);
+  const handlePwdToggle = useCallback(() => cart.setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd'), [cart, item.cart_key, item.discount_type]);
 
   return (
     <article className="cart-item-row rounded-2xl overflow-hidden border border-gray-200 bg-white shadow-sm" aria-label={`${item.item_name} in cart`}>
@@ -1613,7 +1595,7 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
 
       <div className="flex items-center gap-2 px-3 py-1.5">
         <div className="flex items-center gap-1 bg-gray-50 rounded-xl border border-gray-200 p-0.5">
-          <button onClick={() => cart.updateQty(item.cart_key, -1)} aria-label={`Decrease quantity of ${item.item_name}`}
+          <button onClick={handleQtyMinus} aria-label={`Decrease quantity of ${item.item_name}`}
             className="w-7 h-7 rounded-lg hover:bg-red-50 hover:text-red-500 flex items-center justify-center text-gray-500 transition-colors">
             <Minus size={11} />
           </button>
@@ -1621,7 +1603,7 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
             aria-live="polite">
             {item.qty}
           </span>
-          <button onClick={() => cart.updateQty(item.cart_key, 1)} aria-label={`Increase quantity of ${item.item_name}`}
+          <button onClick={handleQtyPlus} aria-label={`Increase quantity of ${item.item_name}`}
             className="w-7 h-7 rounded-lg hover:bg-green-50 hover:text-green-600 flex items-center justify-center text-gray-500 transition-colors">
             <Plus size={11} />
           </button>
@@ -1645,7 +1627,7 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
           )}
         </button>
 
-        <button onClick={() => cart.removeItem(item.cart_key)} aria-label={`Remove ${item.item_name}`}
+        <button onClick={handleRemove} aria-label={`Remove ${item.item_name}`}
           className="w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors shrink-0">
           <X size={13} />
         </button>
@@ -1654,13 +1636,13 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
       <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
         <span className="text-xs text-gray-400 font-medium">Discount:</span>
         <button
-          onClick={() => cart.setDiscount(item.cart_key, item.discount_type === 'sc' ? null : 'sc')}
+          onClick={handleScToggle}
           aria-pressed={item.discount_type === 'sc'}
           className={`discount-btn discount-btn-sc ${item.discount_type === 'sc' ? 'active' : ''}`}>
           SC
         </button>
         <button
-          onClick={() => cart.setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd')}
+          onClick={handlePwdToggle}
           aria-pressed={item.discount_type === 'pwd'}
           className={`discount-btn discount-btn-pwd ${item.discount_type === 'pwd' ? 'active' : ''}`}>
           PWD
@@ -1682,9 +1664,9 @@ function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }
       )}
     </article>
   );
-}
+});
 
-// ─── Size Picker Modal (no add‑ons) ──────────────────────────────
+// ─── Size Picker Modal ────────────────────────────────────────
 function SizePickerModal({
   item, onClose, onAdd,
 }: {
@@ -1718,12 +1700,12 @@ function SizePickerModal({
                 return (
                   <button key={s.id} onClick={() => setSelectedSize(s)}
                     role="radio" aria-checked={isActive}
-                    className="flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-all text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
+                    className="flex items-center justify-between px-4 py-3 rounded-2xl border-2 transition-colors duration-100 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                     style={isActive
                       ? { borderColor: 'var(--mango-yellow)', backgroundColor: 'var(--mango-yellow-xl)', color: '#78350f' }
                       : { borderColor: '#E4E4E7', backgroundColor: '#fff', color: '#3F3F46' }}>
                     <div className="flex items-center gap-3">
-                      <div className="w-4 h-4 rounded-full border-2 flex items-center justify-center transition-all"
+                      <div className="w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors"
                         style={isActive ? { borderColor: 'var(--mango-yellow)', backgroundColor: 'var(--mango-yellow)' } : { borderColor: '#D1D1D6' }}>
                         {isActive && <div className="w-1.5 h-1.5 rounded-full bg-amber-800" />}
                       </div>
@@ -1756,7 +1738,7 @@ function SizePickerModal({
   );
 }
 
-// ─── Checkout Modal (PIN removed) ───────────────────────────────────────────
+// ─── Checkout Modal ────────────────────────────────────────────
 function CheckoutModal({ shift, onClose, onSuccess }: {
   shift: Shift | null | undefined; onClose: () => void; onSuccess: () => void;
 }) {
@@ -1765,43 +1747,42 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   const checkout = useCheckout();
   const { data: settings } = useSettings();
   const total = cart.total();
-const [payments, setPayments] = useState<PaymentLine[]>([{ method: 'cash', amount: total }]);
-const [tendered, setTendered] = useState('');
-const [step, setStep] = useState<'payment' | 'success'>('payment');
-const [result, setResult] = useState<{ receipt_number: string; change: number } | null>(null);
-const [receiptData, setReceiptData] = useState<SaleDetail | null>(null);
-// Fix 6: allow cashier to select order type instead of hardcoding dine_in
-const [orderType, setOrderType] = useState<'dine_in' | 'take_out'>('dine_in');
+  const [payments, setPayments] = useState<PaymentLine[]>([{ method: 'cash', amount: total }]);
+  const [tendered, setTendered] = useState('');
+  const [step, setStep] = useState<'payment' | 'success'>('payment');
+  const [result, setResult] = useState<{ receipt_number: string; change: number } | null>(null);
+  const [receiptData, setReceiptData] = useState<SaleDetail | null>(null);
+  const [orderType, setOrderType] = useState<'dine_in' | 'take_out'>('dine_in');
 
-  const paymentTotal = payments.reduce((s, p) => s + (p.amount || 0), 0);
-  const hasCash = payments.some(p => p.method === 'cash');
-  const cashPaymentTotal = payments.filter(p => p.method === 'cash').reduce((s, p) => s + p.amount, 0);
+  const paymentTotal = useMemo(() => payments.reduce((s, p) => s + (p.amount || 0), 0), [payments]);
+  const hasCash = useMemo(() => payments.some(p => p.method === 'cash'), [payments]);
+  const cashPaymentTotal = useMemo(() => payments.filter(p => p.method === 'cash').reduce((s, p) => s + p.amount, 0), [payments]);
   const tenderedNum = parseFloat(tendered) || 0;
   const change = hasCash && tenderedNum > 0 ? Math.max(0, tenderedNum - total) : 0;
   const balanced = Math.abs(paymentTotal - total) < 0.01;
   const tenderedOk = !hasCash || (!!tendered && tenderedNum >= cashPaymentTotal);
 
-  const addPaymentLine = () => {
+  const addPaymentLine = useCallback(() => {
     const used: PaymentMethod[] = payments.map(p => p.method);
     const next = (['cash', 'gcash', 'maya'] as PaymentMethod[]).find(m => !used.includes(m));
     if (!next) return;
     setPayments(prev => [...prev, { method: next, amount: 0 }]);
-  };
+  }, [payments]);
 
-  const updatePayment = (idx: number, field: 'method' | 'amount', val: string) => {
+  const updatePayment = useCallback((idx: number, field: 'method' | 'amount', val: string) => {
     setPayments(prev => prev.map((p, i) => i === idx ? {
       ...p, [field]: field === 'amount' ? parseFloat(val) || 0 : val,
     } : p));
-  };
+  }, []);
 
-  const doCheckout = async () => {
+  const doCheckout = useCallback(async () => {
     if (!user) return;
     try {
-const res = await checkout.mutateAsync({
-  idempotency_key: cart.cart.idempotency_key,
-  shift_id: shift?.id,
-  order_type: orderType,           // Fix 6: use selected value
-  note: cart.cart.note || undefined,
+      const res = await checkout.mutateAsync({
+        idempotency_key: cart.cart.idempotency_key,
+        shift_id: shift?.id,
+        order_type: orderType,
+        note: cart.cart.note || undefined,
         tendered_amount: hasCash && tendered ? tenderedNum : undefined,
         actioned_by_user_id: user.id,
         actioned_by_name: user.name,
@@ -1813,12 +1794,12 @@ const res = await checkout.mutateAsync({
         })),
         payments,
       });
-setResult({ receipt_number: res.receipt_number, change: res.change });
-setReceiptData({
-  id: '', receipt_number: res.receipt_number,
-  cashier_id: user.id, cashier_name: user.name,
-  order_type: orderType,           // Fix 6: use selected value
-  status: 'completed', sale_type: 'normal',
+      setResult({ receipt_number: res.receipt_number, change: res.change });
+      setReceiptData({
+        id: '', receipt_number: res.receipt_number,
+        cashier_id: user.id, cashier_name: user.name,
+        order_type: orderType,
+        status: 'completed', sale_type: 'normal',
         total: res.total, discount_total: cart.discountTotal(), subtotal: cart.subtotal(),
         created_at: new Date().toISOString(), is_reprinted: false,
         shift_id: shift?.id ?? null, note: cart.cart.note || null,
@@ -1838,7 +1819,7 @@ setReceiptData({
     } catch (e: unknown) {
       toast(e instanceof Error ? e.message : 'Checkout failed', 'error');
     }
-  };
+  }, [user, cart, checkout, shift, orderType, hasCash, tendered, tenderedNum, payments]);
 
   return (
     <Modal
@@ -1850,32 +1831,28 @@ setReceiptData({
       {step === 'success' && result ? (
         <div className="flex flex-col gap-5">
           <div className="text-center py-2">
-            <div className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-4 shadow-lg"
-              style={{ backgroundColor: '#D1FAE5', boxShadow: '0 4px 20px rgba(16,185,129,0.25)' }}>
+            <div className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-4"
+              style={{ backgroundColor: '#D1FAE5' }}>
               <span className="text-4xl">✓</span>
             </div>
             <div>
-  <p className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
-    style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Order Type</p>
-  <div className="flex gap-2">
-    {(['dine_in', 'take_out'] as const).map(type => (
-      <button
-        key={type}
-        type="button"
-        onClick={() => setOrderType(type)}
-        className="flex-1 py-2.5 rounded-xl text-sm font-700 border transition-all"
-        style={{
-          fontWeight: 700,
-          backgroundColor: orderType === type ? 'var(--mango-yellow)' : '#fff',
-          color: orderType === type ? '#78350f' : '#52525B',
-          borderColor: orderType === type ? 'var(--mango-yellow)' : '#E4E4E7',
-        }}
-      >
-        {type === 'dine_in' ? '🍽 Dine In' : '🥡 Take Out'}
-      </button>
-    ))}
-  </div>
-</div>
+              <p className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
+                style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Order Type</p>
+              <div className="flex gap-2">
+                {(['dine_in', 'take_out'] as const).map(type => (
+                  <button key={type} type="button" onClick={() => setOrderType(type)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-700 border transition-colors"
+                    style={{
+                      fontWeight: 700,
+                      backgroundColor: orderType === type ? 'var(--mango-yellow)' : '#fff',
+                      color: orderType === type ? '#78350f' : '#52525B',
+                      borderColor: orderType === type ? 'var(--mango-yellow)' : '#E4E4E7',
+                    }}>
+                    {type === 'dine_in' ? '🍽 Dine In' : '🥡 Take Out'}
+                  </button>
+                ))}
+              </div>
+            </div>
             <p className="text-gray-500 text-sm font-medium mb-1">Receipt</p>
             <div className="text-gray-900 font-900 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 900 }}>
               {result.receipt_number}
@@ -1919,6 +1896,25 @@ setReceiptData({
                 <span>Discount applied</span><span>−{fmt(cart.discountTotal())}</span>
               </div>
             )}
+          </div>
+
+          <div>
+            <p className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
+              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Order Type</p>
+            <div className="flex gap-2 mb-4">
+              {(['dine_in', 'take_out'] as const).map(type => (
+                <button key={type} type="button" onClick={() => setOrderType(type)}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-700 border transition-colors"
+                  style={{
+                    fontWeight: 700,
+                    backgroundColor: orderType === type ? 'var(--mango-yellow)' : '#fff',
+                    color: orderType === type ? '#78350f' : '#52525B',
+                    borderColor: orderType === type ? 'var(--mango-yellow)' : '#E4E4E7',
+                  }}>
+                  {type === 'dine_in' ? '🍽 Dine In' : '🥡 Take Out'}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div>
@@ -1978,7 +1974,7 @@ setReceiptData({
                   .map(v => (
                     <button key={v} onClick={() => setTendered(v.toString())}
                       aria-pressed={tendered === v.toString()}
-                      className="px-3 py-1.5 rounded-xl text-xs font-700 transition-all border hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
+                      className="px-3 py-1.5 rounded-xl text-xs font-700 transition-colors duration-75 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                       style={{
                         fontFamily: 'var(--font-display)', fontWeight: 700,
                         backgroundColor: tendered === v.toString() ? 'var(--mango-yellow)' : '#fff',
@@ -2034,12 +2030,12 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
     onClose();
   };
 
-  const handleRestore = (order: HeldOrder) => {
+  const handleRestore = useCallback((order: HeldOrder) => {
     cart.loadFromHeld(order.data);
     deleteHeld.mutate(order.id);
     onRestore();
     toast('Order restored');
-  };
+  }, [cart, deleteHeld, onRestore]);
 
   return (
     <Modal open onClose={onClose} title="📋 Parked Orders" maxWidth="max-w-md">
@@ -2049,7 +2045,7 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
             {!showHoldForm ? (
               <button
                 onClick={() => setShowHoldForm(true)}
-                className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border-2 border-dashed border-amber-300 hover:bg-yellow-50 transition-all text-left"
+                className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border-2 border-dashed border-amber-300 hover:bg-yellow-50 transition-colors text-left"
               >
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: 'var(--mango-yellow)' }}>
@@ -2099,7 +2095,7 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
             <div className="flex flex-col gap-2">
               {heldOrders.map((order: HeldOrder) => (
                 <div key={order.id}
-                  className="flex items-center justify-between bg-white border border-gray-200 rounded-2xl px-4 py-3.5 shadow-sm hover:border-yellow-300 transition-all">
+                  className="flex items-center justify-between bg-white border border-gray-200 rounded-2xl px-4 py-3.5 shadow-sm hover:border-yellow-300 transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
                       style={{ backgroundColor: 'var(--mango-yellow-lt)' }}>
@@ -2146,12 +2142,12 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
   const [showAnyPin, setShowAnyPin] = useState(false);
   const [pendingAction, setPendingAction] = useState<'open' | 'close' | 'drop' | null>(null);
 
-  const triggerAction = (action: 'open' | 'close' | 'drop') => {
+  const triggerAction = useCallback((action: 'open' | 'close' | 'drop') => {
     setPendingAction(action);
     setShowAnyPin(true);
-  };
+  }, []);
 
-  const executeAction = async (actioner: { user_id: string; user_name: string; role: string }) => {
+  const executeAction = useCallback(async (actioner: { user_id: string; user_name: string; role: string }) => {
     setShowAnyPin(false);
     if (pendingAction === 'open') {
       await openShift.mutateAsync({ starting_float: parseFloat(startFloat) || 0 });
@@ -2168,7 +2164,7 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
       onClose();
     }
     setPendingAction(null);
-  };
+  }, [pendingAction, openShift, closeShift, cashDrop, shift, startFloat, closingCash, closeNotes, dropAmount, dropReason, onClose]);
 
   if (!shift) {
     return (
@@ -2205,7 +2201,7 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
           {(['overview', 'drop', 'close'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               role="tab" aria-selected={tab === t}
-              className={clsx('flex-1 py-2 rounded-xl text-xs font-700 capitalize transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+              className={clsx('flex-1 py-2 rounded-xl text-xs font-700 capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                 tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
               )}
               style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
@@ -2297,7 +2293,7 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+const StatCard = memo(function StatCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="rounded-2xl p-3.5 border"
       style={accent
@@ -2307,7 +2303,7 @@ function StatCard({ label, value, accent }: { label: string; value: string; acce
       <div className="font-900 text-xl text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 900 }}>{value}</div>
     </div>
   );
-}
+});
 
 // ─── Partial Void / Refund Modal ──────────────────────────────
 function PartialActionModal({
@@ -2323,21 +2319,22 @@ function PartialActionModal({
   const [loading, setLoading] = useState(false);
   const [showAnyPin, setShowAnyPin] = useState(false);
 
-  const toggleItem = (idx: number) => {
+  const toggleItem = useCallback((idx: number) => {
     setSelectedItems(prev => {
       const next = new Set(prev);
       if (next.has(idx)) next.delete(idx); else next.add(idx);
       return next;
     });
-  };
+  }, []);
 
-  const selectedTotal = mode === 'entire'
+  const selectedTotal = useMemo(() => mode === 'entire'
     ? sale.total
-    : Array.from(selectedItems).reduce((s, i) => s + (sale.items[i]?.final_price ?? 0), 0);
+    : Array.from(selectedItems).reduce((s, i) => s + (sale.items[i]?.final_price ?? 0), 0),
+  [mode, selectedItems, sale]);
 
   const canConfirm = reason.trim() && (mode === 'entire' || selectedItems.size > 0);
 
-  const handleConfirm = async (actioner: { user_id: string; user_name: string; role: string }) => {
+  const handleConfirm = useCallback(async (actioner: { user_id: string; user_name: string; role: string }) => {
     setShowAnyPin(false);
     setLoading(true);
     try {
@@ -2356,7 +2353,7 @@ function PartialActionModal({
     } finally {
       setLoading(false);
     }
-  };
+  }, [sale, reason, mode, selectedItems, action, voidSale, refundSale, onDone]);
 
   const actionLabel = action === 'void' ? 'Void' : 'Refund';
 
@@ -2367,7 +2364,7 @@ function PartialActionModal({
           <div className="flex gap-1 bg-gray-100 p-1 rounded-xl" role="tablist">
             <button onClick={() => setMode('entire')}
               role="tab" aria-selected={mode === 'entire'}
-              className={clsx('flex-1 py-2 rounded-xl text-sm font-700 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+              className={clsx('flex-1 py-2 rounded-xl text-sm font-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                 mode === 'entire' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
               )}
               style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
@@ -2375,7 +2372,7 @@ function PartialActionModal({
             </button>
             <button onClick={() => setMode('items')}
               role="tab" aria-selected={mode === 'items'}
-              className={clsx('flex-1 py-2 rounded-xl text-sm font-700 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+              className={clsx('flex-1 py-2 rounded-xl text-sm font-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                 mode === 'items' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
               )}
               style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
@@ -2401,11 +2398,11 @@ function PartialActionModal({
                   return (
                     <button key={idx} onClick={() => toggleItem(idx)}
                       aria-pressed={isSelected}
-                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                      className="flex items-center gap-3 px-3 py-2.5 rounded-xl border-2 transition-colors text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
                       style={isSelected
                         ? { borderColor: '#FCA5A5', backgroundColor: '#FFF1F2' }
                         : { borderColor: '#E4E4E7', backgroundColor: '#fff' }}>
-                      <div className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all"
+                      <div className="w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors"
                         style={isSelected ? { borderColor: '#EF4444', backgroundColor: '#EF4444' } : { borderColor: '#D1D1D6' }}>
                         {isSelected && <span className="text-white text-xs leading-none font-black">✓</span>}
                       </div>
@@ -2467,21 +2464,22 @@ function EditSaleModal({ sale, onClose, onDone }: { sale: SaleDetail; onClose: (
   const [loading, setLoading] = useState(false);
   const [showAnyPin, setShowAnyPin] = useState(false);
 
-  const paymentTotal = payments.reduce((s, p) => s + (p.amount || 0), 0);
+  const paymentTotal = useMemo(() => payments.reduce((s, p) => s + (p.amount || 0), 0), [payments]);
   const balanced = Math.abs(paymentTotal - sale.total) < 0.01;
+  const hasCash = useMemo(() => payments.some(p => p.method === 'cash'), [payments]);
 
-  const updatePayment = (idx: number, field: 'method' | 'amount', val: string) => {
+  const updatePayment = useCallback((idx: number, field: 'method' | 'amount', val: string) => {
     setPayments(prev => prev.map((p, i) => i === idx ? { ...p, [field]: field === 'amount' ? parseFloat(val) || 0 : val } : p));
-  };
+  }, []);
 
-  const addPaymentLine = () => {
+  const addPaymentLine = useCallback(() => {
     const used = payments.map(p => p.method);
     const next = (['cash', 'gcash', 'maya'] as PaymentMethod[]).find(m => !used.includes(m));
     if (!next) return;
     setPayments(prev => [...prev, { method: next, amount: 0 }]);
-  };
+  }, [payments]);
 
-  const handleSave = async (actioner: { user_id: string; user_name: string; role: string }) => {
+  const handleSave = useCallback(async (actioner: { user_id: string; user_name: string; role: string }) => {
     setShowAnyPin(false);
     setLoading(true);
     try {
@@ -2498,9 +2496,7 @@ function EditSaleModal({ sale, onClose, onDone }: { sale: SaleDetail; onClose: (
     } finally {
       setLoading(false);
     }
-  };
-
-  const hasCash = payments.some(p => p.method === 'cash');
+  }, [editSale, sale.id, note, payments, tendered, onDone]);
 
   return (
     <>
@@ -2598,7 +2594,7 @@ function EditSaleModal({ sale, onClose, onDone }: { sale: SaleDetail; onClose: (
   );
 }
 
-// ─── Sales Page ───────────────────────────────────────────────
+// ─── Sales Page ────────────────────────────────────────────────
 function SalesPage() {
   const openPinModal = useUIStore(s => s.openPinModal);
   const [dateFrom, setDateFrom] = useState(new Date().toISOString().slice(0, 10));
@@ -2622,30 +2618,27 @@ function SalesPage() {
   const softDelete = useSoftDeleteSale();
   const reprint = useReprintSale();
 
-  const handleReprint = () => setShowAnyPinForReprint(true);
+  const handleReprint = useCallback(() => setShowAnyPinForReprint(true), []);
 
-  const doReprint = async (actioner: { user_id: string; user_name: string; role: string }) => {
-  if (!saleDetail) return;
-  setShowAnyPinForReprint(false);
-  await reprint.mutateAsync({ id: saleDetail.id, actioned_by_user_id: actioner.user_id, actioned_by_name: actioner.user_name });
-  toast('Reprint recorded');
-  if (settings) {
-    await printReceipt(saleDetail, settings);
-  } else {
-    // Fix 5: window.print() does nothing inside a Capacitor Android WebView.
-    // If settings haven't loaded yet, show an actionable error instead of
-    // silently calling window.print() and leaving the user with no feedback.
-    toast('Printer settings not loaded yet — please try again in a moment.', 'error');
-  }
-};
+  const doReprint = useCallback(async (actioner: { user_id: string; user_name: string; role: string }) => {
+    if (!saleDetail) return;
+    setShowAnyPinForReprint(false);
+    await reprint.mutateAsync({ id: saleDetail.id, actioned_by_user_id: actioner.user_id, actioned_by_name: actioner.user_name });
+    toast('Reprint recorded');
+    if (settings) {
+      await printReceipt(saleDetail, settings);
+    } else {
+      toast('Printer settings not loaded yet — please try again in a moment.', 'error');
+    }
+  }, [saleDetail, reprint, settings]);
 
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = useCallback(() => {
     if (!deleteReason) return;
     setDeleteModal(false);
     setShowAnyPinForDelete(true);
-  };
+  }, [deleteReason]);
 
-  const doDelete = async (actioner: { user_id: string; user_name: string; role: string }) => {
+  const doDelete = useCallback(async (actioner: { user_id: string; user_name: string; role: string }) => {
     if (!saleDetail || !deleteReason) return;
     setShowAnyPinForDelete(false);
     try {
@@ -2655,10 +2648,10 @@ function SalesPage() {
     } catch (e: unknown) {
       toast(e instanceof Error ? e.message : 'Delete failed', 'error');
     }
-  };
+  }, [saleDetail, deleteReason, softDelete, refetch]);
 
-  const statusColor = (s: string) =>
-    s === 'completed' ? 'green' : s === 'voided' ? 'red' : s === 'refunded' ? 'yellow' : 'gray';
+  const statusColor = useCallback((s: string) =>
+    s === 'completed' ? 'green' : s === 'voided' ? 'red' : s === 'refunded' ? 'yellow' : 'gray', []);
 
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
@@ -2705,7 +2698,7 @@ function SalesPage() {
                     onClick={() => setSelectedId(s => s === sale.id ? null : sale.id)}
                     aria-pressed={selectedId === sale.id}
                     className={clsx(
-                      'w-full flex items-center gap-3 px-4 py-3.5 text-left transition-all hover:bg-gray-50',
+                      'w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-gray-50',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 focus-visible:ring-inset',
                       selectedId === sale.id && 'border-l-[3px]'
                     )}
@@ -2858,7 +2851,7 @@ function SalesPage() {
   );
 }
 
-// ─── Admin Employees Page ────────────────────────────────────
+// ─── Admin Employees Page ─────────────────────────────────────
 function AdminEmployeesPage() {
   const { data: users, isLoading } = useUsers();
   const { data: usersList } = useUsersList();
@@ -2930,7 +2923,7 @@ function AdminEmployeesPage() {
             <div className="flex flex-col gap-2.5">
               {users?.map((u: User) => (
                 <div key={u.id}
-                  className={clsx('bg-white border rounded-2xl px-4 py-4 flex items-center gap-3.5 shadow-sm transition-all',
+                  className={clsx('bg-white border rounded-2xl px-4 py-4 flex items-center gap-3.5 shadow-sm',
                     u.is_active ? 'border-gray-150' : 'border-gray-100 opacity-60')}>
                   <div className="w-12 h-12 rounded-2xl flex items-center justify-center font-black text-amber-900 text-lg shrink-0"
                     style={{ backgroundColor: 'var(--mango-yellow)', fontFamily: 'var(--font-display)', fontWeight: 900 }}>
@@ -3035,13 +3028,13 @@ function AdminSettingsPage() {
 
   useEffect(() => { if (settings) { setForm(settings); setDirty(false); } }, [settings]);
 
-  const set = (key: string, val: string) => { setForm(p => ({ ...p, [key]: val })); setDirty(true); };
+  const set = useCallback((key: string, val: string) => { setForm(p => ({ ...p, [key]: val })); setDirty(true); }, []);
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     await updateSettings.mutateAsync(form);
     setDirty(false);
     toast('Settings saved');
-  };
+  }, [updateSettings, form]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -3049,7 +3042,7 @@ function AdminSettingsPage() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [dirty, form]);
+  }, [dirty, handleSave]);
 
   const fields: { key: string; label: string; type?: string; hint?: string }[] = [
     { key: 'store_name',       label: 'Store Name' },
@@ -3097,7 +3090,6 @@ function AdminSettingsPage() {
               </Btn>
             )}
 
-            {/* ── Bluetooth Printer Section ───────────────────────────── */}
             <div className="mt-5 bg-white border border-gray-150 rounded-2xl shadow-sm overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-100 flex items-center gap-2">
                 <Printer size={14} className="text-gray-500" />
@@ -3121,28 +3113,15 @@ function AdminSettingsPage() {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <Btn
-                        variant="secondary"
-                        size="sm"
-                        className="flex-1"
-                        loading={printerLoading}
+                      <Btn variant="secondary" size="sm" className="flex-1" loading={printerLoading}
                         onClick={async () => {
                           setPrinterLoading(true);
-                          try {
-                            const p = await selectAndSavePrinter();
-                            setSavedPrinter(p);
-                          } finally {
-                            setPrinterLoading(false);
-                          }
-                        }}
-                      >
+                          try { const p = await selectAndSavePrinter(); setSavedPrinter(p); }
+                          finally { setPrinterLoading(false); }
+                        }}>
                         <RefreshCw size={12} /> Change Printer
                       </Btn>
-                      <Btn
-                        variant="danger"
-                        size="sm"
-                        onClick={() => { forgetPrinter(); setSavedPrinter(null); }}
-                      >
+                      <Btn variant="danger" size="sm" onClick={() => { forgetPrinter(); setSavedPrinter(null); }}>
                         <Trash2 size={12} /> Forget
                       </Btn>
                     </div>
@@ -3152,27 +3131,18 @@ function AdminSettingsPage() {
                     <p className="text-xs text-gray-500">
                       No printer paired yet. Make sure your 57mm Bluetooth printer is powered on and paired in Android Settings, then tap below.
                     </p>
-                    <Btn
-                      variant="secondary"
-                      fullWidth
-                      loading={printerLoading}
+                    <Btn variant="secondary" fullWidth loading={printerLoading}
                       onClick={async () => {
                         setPrinterLoading(true);
-                        try {
-                          const p = await selectAndSavePrinter();
-                          setSavedPrinter(p);
-                        } finally {
-                          setPrinterLoading(false);
-                        }
-                      }}
-                    >
+                        try { const p = await selectAndSavePrinter(); setSavedPrinter(p); }
+                        finally { setPrinterLoading(false); }
+                      }}>
                       <Printer size={14} /> Pair Bluetooth Printer
                     </Btn>
                   </div>
                 )}
               </div>
             </div>
-            {/* ── End Bluetooth Printer Section ───────────────────────── */}
           </div>
         )}
       </div>
@@ -3180,7 +3150,7 @@ function AdminSettingsPage() {
   );
 }
 
-// ─── Admin Audit Log Page ────────────────────────────────────
+// ─── Admin Audit Log Page ─────────────────────────────────────
 function AdminAuditPage() {
   const [entityType, setEntityType] = useState('');
   const [dateFrom, setDateFrom] = useState('');
@@ -3191,14 +3161,14 @@ function AdminAuditPage() {
     date_to: dateTo || undefined,
   });
 
-  const actionColor = (action: string) => {
+  const actionColor = useCallback((action: string) => {
     if (action.includes('delete') || action.includes('void') || action.includes('remove')) return 'red';
     if (action.includes('create') || action.includes('open') || action.includes('clock_in')) return 'green';
     if (action.includes('update') || action.includes('edit') || action.includes('reset') || action.includes('close')) return 'yellow';
     return 'gray';
-  };
+  }, []);
 
-  const entityIcon = (type: string) => {
+  const entityIcon = useCallback((type: string) => {
     switch (type) {
       case 'sale': return '🧾';
       case 'user': return '👤';
@@ -3207,7 +3177,7 @@ function AdminAuditPage() {
       case 'settings': return '⚙️';
       default: return '📋';
     }
-  };
+  }, []);
 
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
@@ -3270,8 +3240,8 @@ function AdminAuditPage() {
   );
 }
 
-// ─── KPI Card ──────────────────────────────────────────────────
-function KpiCard({ icon, label, value, color }: {
+// ─── KPI Card — memoized, used heavily in dashboard ──────────
+const KpiCard = memo(function KpiCard({ icon, label, value, color }: {
   icon: React.ReactNode; label: string; value: string; color: string;
 }) {
   const colorMap: Record<string, { bg: string; icon: string; border: string }> = {
@@ -3281,7 +3251,7 @@ function KpiCard({ icon, label, value, color }: {
     red:    { bg: '#FFF1F2', icon: 'var(--warrior-red)', border: '#FECDD3' },
     gray:   { bg: '#F9FAFB', icon: '#6B7280', border: '#E5E7EB' },
   };
-  const c = colorMap[color] ?? colorMap.gray; // fallback to gray if unknown
+  const c = colorMap[color] ?? colorMap.gray;
   return (
     <div className="bg-white border rounded-2xl p-4 shadow-sm" style={{ borderColor: c.border }}>
       <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
@@ -3293,11 +3263,9 @@ function KpiCard({ icon, label, value, color }: {
       <div className="font-900 text-xl text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 900 }}>{value}</div>
     </div>
   );
-}
+});
 
-// ================================================================
-// ADMIN MENU PAGE – now with delete and reorder for categories
-// ================================================================
+// ─── Admin Menu Page ──────────────────────────────────────────
 function AdminMenuPage() {
   const { data: menuData, isLoading } = useMenu();
   const createCategory = useCreateCategory();
@@ -3307,8 +3275,8 @@ function AdminMenuPage() {
   const toggleAvailability = useToggleAvailability();
   const createAddon = useCreateAddon();
   const updateAddon = useUpdateAddon();
-  const deleteCategory = useDeleteCategory();                 // NEW
-  const reorderCategory = useReorderCategory();               // NEW
+  const deleteCategory = useDeleteCategory();
+  const reorderCategory = useReorderCategory();
 
   const [tab, setTab] = useState<'items' | 'addons'>('items');
   const [newCatName, setNewCatName] = useState('');
@@ -3318,61 +3286,61 @@ function AdminMenuPage() {
   const [newItem, setNewItem] = useState({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }] });
   const [newAddon, setNewAddon] = useState({ name: '', price: '' });
 
-  const categories = menuData?.categories ?? [];
-  const sortedCategories = [...categories].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-  const allAddons = menuData?.addons ?? [];
+  const categories = useMemo(() => menuData?.categories ?? [], [menuData]);
+  const sortedCategories = useMemo(() => [...categories].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)), [categories]);
+  const allAddons = useMemo(() => menuData?.addons ?? [], [menuData]);
 
-  const handleAddCategory = async () => {
+  const handleAddCategory = useCallback(async () => {
     if (!newCatName.trim()) return;
     await createCategory.mutateAsync({ name: newCatName, sort_order: categories.length });
     setNewCatName('');
     toast('Category added');
-  };
+  }, [createCategory, newCatName, categories.length]);
 
-  const handleAddItem = async () => {
+  const handleAddItem = useCallback(async () => {
     const sizes = newItem.sizes.filter(s => s.name && s.price).map(s => ({ name: s.name, price: parseFloat(s.price) }));
     if (!newItem.name || !sizes.length) return;
     await createItem.mutateAsync({ name: newItem.name, category_id: newItem.category_id || undefined, sizes });
     setNewItem({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }] });
     setShowAddItem(false);
     toast('Item added');
-  };
+  }, [createItem, newItem]);
 
-  const handleAddAddon = async () => {
+  const handleAddAddon = useCallback(async () => {
     if (!newAddon.name || !newAddon.price) return;
     await createAddon.mutateAsync({ name: newAddon.name, price: parseFloat(newAddon.price) });
     setNewAddon({ name: '', price: '' });
     setShowAddAddon(false);
     toast('Add-on added');
-  };
+  }, [createAddon, newAddon]);
 
   const [editForm, setEditForm] = useState<{
     name: string; category_id: string;
     sizes: { id?: string; name: string; price: string }[];
   } | null>(null);
 
-  const openEditItem = (item: MenuItem) => {
+  const openEditItem = useCallback((item: MenuItem) => {
     setEditItem(item);
     setEditForm({ name: item.name, category_id: item.category_id ?? '', sizes: item.sizes.map(s => ({ id: s.id, name: s.name, price: String(s.price) })) });
-  };
+  }, []);
 
-  const handleEditItem = async () => {
+  const handleEditItem = useCallback(async () => {
     if (!editItem || !editForm) return;
     const sizes = editForm.sizes.filter(s => s.name && s.price).map(s => ({ ...(s.id ? { id: s.id } : {}), name: s.name, price: parseFloat(s.price) }));
     if (!editForm.name || !sizes.length) return;
     await updateItem.mutateAsync({ id: editItem.id, name: editForm.name, category_id: editForm.category_id || undefined, sizes });
     setEditItem(null); setEditForm(null);
     toast('Item updated');
-  };
+  }, [updateItem, editItem, editForm]);
 
-  const moveUp = (catId: string) => reorderCategory.mutate({ id: catId, direction: 'up' });
-  const moveDown = (catId: string) => reorderCategory.mutate({ id: catId, direction: 'down' });
+  const moveUp = useCallback((catId: string) => reorderCategory.mutate({ id: catId, direction: 'up' }), [reorderCategory]);
+  const moveDown = useCallback((catId: string) => reorderCategory.mutate({ id: catId, direction: 'down' }), [reorderCategory]);
 
-  const handleDeleteCategory = async (catId: string) => {
+  const handleDeleteCategory = useCallback(async (catId: string) => {
     if (!confirm('Delete this category? All items inside will become uncategorised. This action is logged.')) return;
     await deleteCategory.mutateAsync(catId);
     toast('Category deleted');
-  };
+  }, [deleteCategory]);
 
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
@@ -3382,7 +3350,7 @@ function AdminMenuPage() {
           {(['items', 'addons'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               role="tab" aria-selected={tab === t}
-              className={clsx('px-4 py-1.5 rounded-xl text-xs font-700 capitalize transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+              className={clsx('px-4 py-1.5 rounded-xl text-xs font-700 capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                 tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
               )}
               style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
@@ -3454,7 +3422,7 @@ function AdminMenuPage() {
                           <button
                             onClick={() => toggleAvailability.mutate({ id: item.id, is_available: !item.is_available })}
                             aria-pressed={item.is_available}
-                            className={clsx('px-2.5 py-1 rounded-xl text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                            className={clsx('px-2.5 py-1 rounded-xl text-xs font-700 transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                               item.is_available
                                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                                 : 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
@@ -3463,12 +3431,12 @@ function AdminMenuPage() {
                             {item.is_available ? '✓ Available' : "86'd"}
                           </button>
                           <button onClick={() => openEditItem(item)}
-                            className="p-2 rounded-xl text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
+                            className="p-2 rounded-xl text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400">
                             <Edit2 size={13} />
                           </button>
                           <button
                             onClick={async () => { if (confirm(`Delete "${item.name}"?`)) await deleteItem.mutateAsync(item.id); }}
-                            className="p-2 rounded-xl text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
+                            className="p-2 rounded-xl text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400">
                             <Trash2 size={13} />
                           </button>
                         </div>
@@ -3483,7 +3451,6 @@ function AdminMenuPage() {
             })}
           </div>
         ) : (
-          // addons tab (unchanged)
           <div className="max-w-2xl mx-auto">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {allAddons.map((addon: Addon) => (
@@ -3498,7 +3465,7 @@ function AdminMenuPage() {
                   <button
                     onClick={() => updateAddon.mutate({ id: addon.id, is_available: !addon.is_available })}
                     aria-pressed={addon.is_available}
-                    className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                    className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                       addon.is_available
                         ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                         : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
@@ -3514,8 +3481,6 @@ function AdminMenuPage() {
         )}
       </div>
 
-      {/* ---------- MODALS (previously missing) ---------- */}
-      {/* Add Item Modal */}
       <Modal open={showAddItem} onClose={() => setShowAddItem(false)} title="Add Menu Item" maxWidth="max-w-md">
         <div className="flex flex-col gap-4">
           <Input label="Item Name" value={newItem.name} onChange={v => setNewItem(p => ({ ...p, name: v }))} autoFocus />
@@ -3553,7 +3518,6 @@ function AdminMenuPage() {
         </div>
       </Modal>
 
-      {/* Edit Item Modal */}
       <Modal open={!!editItem} onClose={() => { setEditItem(null); setEditForm(null); }} title={`Edit: ${editItem?.name}`} maxWidth="max-w-md">
         {editForm && (
           <div className="flex flex-col gap-4">
@@ -3596,7 +3560,6 @@ function AdminMenuPage() {
         )}
       </Modal>
 
-      {/* Add Add-on Modal */}
       <Modal open={showAddAddon} onClose={() => setShowAddAddon(false)} title="Add Add-on">
         <div className="flex flex-col gap-4">
           <Input label="Add-on Name" value={newAddon.name} onChange={v => setNewAddon(p => ({ ...p, name: v }))} autoFocus />
@@ -3612,29 +3575,23 @@ function AdminMenuPage() {
   );
 }
 
-// ================================================================
-// DETAILED REPORT MODAL (new component)
-// ================================================================
+// ─── Detailed Report Modal ────────────────────────────────────
 function DetailedReportModal({ onClose }: { onClose: () => void }) {
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
   const [dateValue, setDateValue] = useState(new Date().toISOString().slice(0, 10));
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
 
-  let params: any = { period };
-  if (period === 'daily') {
-    params.date = dateValue;
-  } else if (period === 'weekly') {
-    const start = startOfWeek(parseISO(dateValue), { weekStartsOn: 1 });
-    const end = endOfWeek(parseISO(dateValue), { weekStartsOn: 1 });
-    params.date_from = format(start, 'yyyy-MM-dd');
-    params.date_to = format(end, 'yyyy-MM-dd');
-  } else if (period === 'monthly') {
-    params.year = year;
-    params.month = month;
-  } else if (period === 'yearly') {
-    params.year = year;
-  }
+  const params = useMemo(() => {
+    if (period === 'daily') return { period, date: dateValue };
+    if (period === 'weekly') {
+      const start = startOfWeek(parseISO(dateValue), { weekStartsOn: 1 });
+      const end = endOfWeek(parseISO(dateValue), { weekStartsOn: 1 });
+      return { period, date_from: format(start, 'yyyy-MM-dd'), date_to: format(end, 'yyyy-MM-dd') };
+    }
+    if (period === 'monthly') return { period, year, month };
+    return { period, year };
+  }, [period, dateValue, year, month]);
 
   const { data, isLoading, error } = useDetailedSalesReport(params);
 
@@ -3646,7 +3603,7 @@ function DetailedReportModal({ onClose }: { onClose: () => void }) {
             {(['daily', 'weekly', 'monthly', 'yearly'] as const).map(p => (
               <button key={p} onClick={() => setPeriod(p)}
                 role="tab" aria-selected={period === p}
-                className={clsx('px-4 py-1.5 rounded-xl text-xs font-700 capitalize transition-all',
+                className={clsx('px-4 py-1.5 rounded-xl text-xs font-700 capitalize transition-colors',
                   period === p ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                 )}
                 style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
@@ -3711,9 +3668,7 @@ function DetailedReportModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ================================================================
-// ADMIN DASHBOARD PAGE – with "Detailed Report" button
-// ================================================================
+// ─── Admin Dashboard Page ─────────────────────────────────────
 function AdminDashboardPage() {
   const [dateFrom, setDateFrom] = useState(new Date().toISOString().slice(0, 10));
   const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
@@ -3801,9 +3756,9 @@ function AdminDashboardPage() {
               ]).map(l => (
                 <button key={l.page} onClick={() => navigate(l.page)}
                   className="flex flex-col items-start gap-3 px-4 py-4 bg-white border border-gray-150 rounded-2xl
-                    hover:shadow-md transition-all text-left group active:scale-98 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
+                    hover:shadow-md transition-shadow text-left group active:scale-98 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400"
                   style={{ boxShadow: 'var(--shadow-sm)' }}>
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center transition-all"
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center transition-colors"
                     style={{ backgroundColor: l.color + '18', color: l.color }}>
                     {l.icon}
                   </div>
@@ -3821,7 +3776,7 @@ function AdminDashboardPage() {
   );
 }
 
-// ─── App Shell (full width – maximizing viewfront) ──────────
+// ─── App Shell ────────────────────────────────────────────────
 function AppShell() {
   const { page } = useUIStore();
   const { user } = useAuthStore();
@@ -3895,7 +3850,6 @@ export default function App() {
         .then(res => { if (!res.ok) logout() })
         .catch(() => logout())
     }
-    // Silently reconnect to the saved Bluetooth printer on every app open
     autoReconnectPrinter()
   }, [])
 

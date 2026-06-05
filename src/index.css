@@ -1,3 +1,4 @@
+/* ── Fonts: use display=swap + preconnect (handled in index.html) ── */
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
 
 @tailwind base;
@@ -37,7 +38,7 @@
   --surface-raised: #FFFFFF;
   --surface-sunken: #F4F3F0;
 
-  /* ── Shadows ── */
+  /* ── Shadows — lighter on low-spec (shadows are GPU-expensive) ── */
   --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.04);
   --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.07), 0 1px 2px -1px rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.05);
@@ -59,12 +60,7 @@
   --font-display: 'Plus Jakarta Sans', system-ui, sans-serif;
   --font-body:    'DM Sans', system-ui, sans-serif;
 
-  /* ══════════════════════════════════════════
-     ITEM CARD — SOLID COLOR TOKENS
-     Each variant: solid bg, white text, darker hover
-     ══════════════════════════════════════════ */
-
-  /* Amber */
+  /* ── Item card color tokens ── */
   --ic-amber-bg:        #F59E0B;
   --ic-amber-bg-hover:  #D97706;
   --ic-amber-border:    #B45309;
@@ -73,7 +69,6 @@
   --ic-amber-price:     #FFFBEB;
   --ic-amber-strip:     rgba(0,0,0,0.15);
 
-  /* Emerald */
   --ic-emerald-bg:        #059669;
   --ic-emerald-bg-hover:  #047857;
   --ic-emerald-border:    #065F46;
@@ -82,7 +77,6 @@
   --ic-emerald-price:     #ECFDF5;
   --ic-emerald-strip:     rgba(0,0,0,0.15);
 
-  /* Rose */
   --ic-rose-bg:        #E11D48;
   --ic-rose-bg-hover:  #BE123C;
   --ic-rose-border:    #9F1239;
@@ -91,7 +85,6 @@
   --ic-rose-price:     #FFF1F2;
   --ic-rose-strip:     rgba(0,0,0,0.15);
 
-  /* Violet */
   --ic-violet-bg:        #7C3AED;
   --ic-violet-bg-hover:  #6D28D9;
   --ic-violet-border:    #5B21B6;
@@ -100,7 +93,6 @@
   --ic-violet-price:     #F5F3FF;
   --ic-violet-strip:     rgba(0,0,0,0.15);
 
-  /* Sky */
   --ic-sky-bg:        #0284C7;
   --ic-sky-bg-hover:  #0369A1;
   --ic-sky-border:    #075985;
@@ -109,7 +101,6 @@
   --ic-sky-price:     #E0F2FE;
   --ic-sky-strip:     rgba(0,0,0,0.15);
 
-  /* Orange */
   --ic-orange-bg:        #EA580C;
   --ic-orange-bg-hover:  #C2410C;
   --ic-orange-border:    #9A3412;
@@ -118,7 +109,6 @@
   --ic-orange-price:     #FFF7ED;
   --ic-orange-strip:     rgba(0,0,0,0.15);
 
-  /* Pink */
   --ic-pink-bg:        #DB2777;
   --ic-pink-bg-hover:  #BE185D;
   --ic-pink-border:    #9D174D;
@@ -127,7 +117,6 @@
   --ic-pink-price:     #FDF2F8;
   --ic-pink-strip:     rgba(0,0,0,0.15);
 
-  /* Teal */
   --ic-teal-bg:        #0F766E;
   --ic-teal-bg-hover:  #0D5E57;
   --ic-teal-border:    #0A4744;
@@ -140,6 +129,7 @@
 /* ── Reset & Base ── */
 *, *::before, *::after {
   box-sizing: border-box;
+  /* Prevent flash of highlight on tap (Android) */
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -151,6 +141,8 @@ html {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Tell Android Chrome to use GPU compositing for the whole page */
+  transform: translateZ(0);
 }
 
 /* ── Tablet scaling fix ── */
@@ -167,12 +159,17 @@ body {
   color: var(--gray-900);
   font-family: var(--font-body);
   line-height: 1.5;
+  /* Promote body to its own composite layer — reduces repaints */
+  will-change: transform;
 }
 
 #root {
   height: 100%;
   display: flex;
   flex-direction: column;
+  /* Explicit GPU layer for root — prevents full-page compositing on interaction */
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 /* ── Scrollbars ── */
@@ -185,18 +182,23 @@ body {
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* ── Smooth scroll + touch swipe ── */
+/* ── Smooth scroll + native momentum scrolling on Android ── */
 .scrollable {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  scroll-behavior: smooth;
+  /* DO NOT use scroll-behavior:smooth here — causes janky scrolling on low-end Android */
+  /* Use JS scrollIntoView({behavior:'smooth'}) only when intentionally triggered */
+  /* Promote scrollable containers to their own GPU layer */
+  will-change: scroll-position;
+  transform: translateZ(0);
 }
 .scrollable-x {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
-  scroll-behavior: smooth;
+  will-change: scroll-position;
+  transform: translateZ(0);
 }
 
 /* ── Focus ring ── */
@@ -246,36 +248,59 @@ body {
 .shimmer {
   background: linear-gradient(90deg, var(--gray-100) 25%, var(--gray-150) 50%, var(--gray-100) 75%);
   background-size: 200% 100%;
-  animation: shimmer 1.4s infinite;
+  /* Use GPU-only property for shimmer — no layout thrash */
+  animation: shimmer 1.4s ease-in-out infinite;
   border-radius: var(--radius-md);
+  will-change: background-position;
 }
 
-/* ── Animations ── */
+/* ── Spinner ── */
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.animate-spin { animation: spin 0.8s linear infinite; }
+.animate-spin {
+  animation: spin 0.8s linear infinite;
+  will-change: transform;
+}
 
+/* ── Bounce-in modal / card appear ── */
 @keyframes bounceIn {
-  0%   { transform: scale(0.92); opacity: 0; }
-  60%  { transform: scale(1.03); opacity: 1; }
-  100% { transform: scale(1); }
+  0%   { transform: scale(0.94) translateZ(0); opacity: 0; }
+  60%  { transform: scale(1.02) translateZ(0); opacity: 1; }
+  100% { transform: scale(1) translateZ(0); }
 }
-.animate-bounce-in { animation: bounceIn 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+.animate-bounce-in {
+  animation: bounceIn 0.18s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  will-change: transform, opacity;
+}
 
+/* ── Fade-up ── */
 @keyframes fadeUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(6px) translateZ(0); }
+  to   { opacity: 1; transform: translateY(0) translateZ(0); }
 }
-.animate-fade-up { animation: fadeUp 0.2s ease-out forwards; }
+.animate-fade-up {
+  animation: fadeUp 0.16s ease-out forwards;
+  will-change: transform, opacity;
+}
 
-/* ── Active press scale ── */
-.active\:scale-95:active { transform: scale(0.95); }
-.active\:scale-98:active { transform: scale(0.98); }
+/* ── Active press — GPU-only transform (no layout) ── */
+.active\:scale-95:active { transform: scale(0.95) translateZ(0); }
+.active\:scale-98:active { transform: scale(0.98) translateZ(0); }
 
-/* ══════════════════════════════════════════════
+/* ── Pulse (shift indicator) ── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ════════════════════════════════════════════════════
    ITEM CARD — FULLY SOLID COLOR
-   The entire card background is the solid brand color.
-   Text is white. No light tints, no shading tricks.
-   ══════════════════════════════════════════════ */
+   Uses GPU-composited properties ONLY on hover/active:
+   transform & opacity. No box-shadow changes on hover
+   (shadow re-paints are expensive on low-end GPU).
+   ════════════════════════════════════════════════════ */
 .item-card-solid {
   position: relative;
   display: flex;
@@ -287,22 +312,31 @@ body {
   overflow: hidden;
   cursor: pointer;
   text-align: left;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
-  box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+
+  /* Only transition GPU-composited properties */
+  transition: transform 0.12s ease, opacity 0.12s ease;
+  box-shadow: 0 3px 8px rgba(0,0,0,0.16);
+
+  /* Promote each card to its own layer — stops grid repaint on tap */
+  will-change: transform;
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
+/* Hover: translateY instead of changing box-shadow (GPU only) */
 .item-card-solid:hover  {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 20px rgba(0,0,0,0.22);
-  filter: brightness(1.06);
+  transform: translateY(-2px) translateZ(0);
 }
-.item-card-solid:active { transform: scale(0.96); }
+.item-card-solid:active {
+  transform: scale(0.95) translateZ(0);
+  opacity: 0.9;
+}
 .item-card-solid:focus-visible {
   outline: 3px solid var(--mango-yellow);
   outline-offset: 2px;
   box-shadow: 0 0 0 5px rgba(249,214,76,0.35);
 }
 
-/* ── Colour-class bindings — SOLID fills ── */
+/* ── Colour-class bindings ── */
 .ic-amber   { background-color: var(--ic-amber-bg); }
 .ic-emerald { background-color: var(--ic-emerald-bg); }
 .ic-rose    { background-color: var(--ic-rose-bg); }
@@ -312,7 +346,7 @@ body {
 .ic-pink    { background-color: var(--ic-pink-bg); }
 .ic-teal    { background-color: var(--ic-teal-bg); }
 
-/* ── Subtle dark overlay strip at top (replaces colored strip) ── */
+/* ── Subtle dark overlay strip at top ── */
 .item-card-strip {
   display: block;
   height: 3px;
@@ -321,7 +355,7 @@ body {
   background: rgba(0, 0, 0, 0.20);
 }
 
-/* ── All text is white on solid cards ── */
+/* ── White text on solid cards ── */
 .ic-amber .ic-text,
 .ic-emerald .ic-text,
 .ic-rose .ic-text,
@@ -329,11 +363,8 @@ body {
 .ic-sky .ic-text,
 .ic-orange .ic-text,
 .ic-pink .ic-text,
-.ic-teal .ic-text {
-  color: #FFFFFF;
-}
+.ic-teal .ic-text { color: #FFFFFF; }
 
-/* Sub-text: slightly transparent white */
 .ic-amber .ic-sub,
 .ic-emerald .ic-sub,
 .ic-rose .ic-sub,
@@ -341,11 +372,8 @@ body {
 .ic-sky .ic-sub,
 .ic-orange .ic-sub,
 .ic-pink .ic-sub,
-.ic-teal .ic-sub {
-  color: rgba(255, 255, 255, 0.88);
-}
+.ic-teal .ic-sub { color: rgba(255, 255, 255, 0.88); }
 
-/* Add button: dark semi-transparent circle */
 .ic-amber .ic-add-btn,
 .ic-emerald .ic-add-btn,
 .ic-rose .ic-add-btn,
@@ -358,20 +386,24 @@ body {
   color: #FFFFFF;
 }
 
-/* ══════════════════════════════════════════════
+/* ════════════════════════════════════════════════════
    CART ITEM ROW
-   ══════════════════════════════════════════════ */
+   Removed box-shadow transition — GPU cost on low-end
+   ════════════════════════════════════════════════════ */
 .cart-item-row {
   border-radius: 14px;
   border: 1.5px solid #E4E4E7;
   background: #FFFFFF;
   overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  /* Only transition border-color (cheap, no repaint) */
+  transition: border-color 0.12s;
   box-shadow: var(--shadow-xs);
+  /* Own layer prevents full-panel repaint on focus */
+  will-change: auto;
+  contain: layout style;
 }
 .cart-item-row:focus-within {
   border-color: var(--mango-yellow);
-  box-shadow: 0 0 0 3px rgba(249,214,76,0.20);
 }
 
 /* ── Discount badge buttons ── */
@@ -382,48 +414,26 @@ body {
   font-weight: 700;
   border: 1.5px solid;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background-color 0.1s, color 0.1s;
   letter-spacing: 0.03em;
 }
 .discount-btn:focus-visible {
   outline: 2px solid var(--mango-yellow);
   outline-offset: 2px;
 }
-.discount-btn-sc {
-  background: #EFF6FF;
-  color: #1D4ED8;
-  border-color: #BFDBFE;
-}
-.discount-btn-sc.active {
-  background: #2563EB;
-  color: #fff;
-  border-color: #2563EB;
-  box-shadow: 0 2px 8px rgba(37,99,235,0.3);
-}
-.discount-btn-pwd {
-  background: #F5F3FF;
-  color: #6D28D9;
-  border-color: #DDD6FE;
-}
-.discount-btn-pwd.active {
-  background: #7C3AED;
-  color: #fff;
-  border-color: #7C3AED;
-  box-shadow: 0 2px 8px rgba(124,58,237,0.3);
-}
+.discount-btn-sc  { background: #EFF6FF; color: #1D4ED8; border-color: #BFDBFE; }
+.discount-btn-sc.active { background: #2563EB; color: #fff; border-color: #2563EB; }
+.discount-btn-pwd { background: #F5F3FF; color: #6D28D9; border-color: #DDD6FE; }
+.discount-btn-pwd.active { background: #7C3AED; color: #fff; border-color: #7C3AED; }
 
 /* ── Toast ── */
-.toast-enter {
-  animation: fadeUp 0.2s ease-out forwards;
-}
+.toast-enter { animation: fadeUp 0.16s ease-out forwards; }
 
 /* ── Print ── */
 @media print {
   body * { visibility: hidden; }
   #receipt-print, #receipt-print * { visibility: visible; }
-  #receipt-print {
-    position: absolute; left: 0; top: 0; width: 100%;
-  }
+  #receipt-print { position: absolute; left: 0; top: 0; width: 100%; }
 }
 
 /* ── Landscape mobile helpers ── */
@@ -431,21 +441,18 @@ body {
   .landscape-compact { padding-top: 4px !important; padding-bottom: 4px !important; }
 }
 
-/* ══════════════════════════════════════════════
-   PIN MODAL — responsive sizing
-   ══════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════
+   PIN MODAL
+   ════════════════════════════════════════════════════ */
 .pin-modal-inner {
-  /* On small viewports shrink the PIN pad */
   max-height: 90vh;
   overflow-y: auto;
 }
-
 @media (max-height: 680px) {
   .pin-dot { width: 36px !important; height: 36px !important; }
   .pin-key  { height: 48px !important; font-size: 16px !important; }
   .pin-gap  { gap: 6px !important; }
 }
-
 @media (max-height: 520px) {
   .pin-dot { width: 28px !important; height: 28px !important; }
   .pin-key  { height: 40px !important; font-size: 14px !important; }
@@ -453,21 +460,11 @@ body {
   .pin-hide-hint { display: none !important; }
 }
 
-/* ══════════════════════════════════════════════
-   CATEGORY DIVIDERS — clean pill style
-   ══════════════════════════════════════════════ */
-.cat-divider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-.cat-divider-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
+/* ════════════════════════════════════════════════════
+   CATEGORY DIVIDERS
+   ════════════════════════════════════════════════════ */
+.cat-divider { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.cat-divider-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .cat-divider-label {
   font-family: var(--font-display);
   font-weight: 800;
@@ -477,14 +474,70 @@ body {
   color: var(--gray-500);
   white-space: nowrap;
 }
-.cat-divider-line {
-  flex: 1;
-  height: 1px;
-  background: var(--gray-150);
+.cat-divider-line { flex: 1; height: 1px; background: var(--gray-150); }
+.cat-divider-count { font-size: 10px; color: var(--gray-400); font-weight: 500; white-space: nowrap; }
+
+/* ════════════════════════════════════════════════════
+   CONTAIN — isolate expensive sub-trees
+   content-visibility:auto defers off-screen paint
+   ════════════════════════════════════════════════════ */
+.contain-layout  { contain: layout; }
+.contain-paint   { contain: paint; }
+.contain-strict  { contain: strict; }
+
+/* Admin page sections that can scroll off-screen */
+.cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 200px;
 }
-.cat-divider-count {
-  font-size: 10px;
-  color: var(--gray-400);
-  font-weight: 500;
-  white-space: nowrap;
+
+/* ════════════════════════════════════════════════════
+   BUTTON — fast touch response
+   touch-action:manipulation disables 300ms tap delay
+   ════════════════════════════════════════════════════ */
+button, [role="button"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  /* Prevent text-selection on rapid taps */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Btn base transition — GPU only ── */
+.btn-base {
+  transition: transform 0.1s ease, opacity 0.1s ease;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* ════════════════════════════════════════════════════
+   MODAL BACKDROP
+   backdrop-filter:blur is expensive on low-end Android.
+   We keep a very light blur (4px) instead of 8-12px.
+   ════════════════════════════════════════════════════ */
+.modal-backdrop {
+  background: rgba(0, 0, 0, 0.28);
+  /* Use a very short blur — perceptually similar, much cheaper */
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+/* ── Input transitions — color only ── */
+input, textarea, select {
+  transition: border-color 0.1s, box-shadow 0.1s;
+  /* Prevent iOS zoom on focus (font-size < 16px) */
+  font-size: max(16px, 1em);
+}
+
+/* ════════════════════════════════════════════════════
+   REDUCE MOTION — honour OS accessibility setting
+   ════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .shimmer { animation: none; background: var(--gray-100); }
 }
