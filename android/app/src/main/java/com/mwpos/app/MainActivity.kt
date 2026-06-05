@@ -29,7 +29,6 @@ import android.os.Bundle
 import android.os.Process
 import android.webkit.WebSettings
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import com.getcapacitor.BridgeActivity
 
 class MainActivity : BridgeActivity() {
