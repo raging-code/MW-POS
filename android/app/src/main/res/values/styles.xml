@@ -11,7 +11,7 @@
 
     <!--
         FIX: Changed android:background from @null to the app's warm-beige page
-        background (#F0EDE8 = CSS var(--surface-page)).
+        background (#F0EDE8 = CSS var(surface-page)).
 
         With @null the window background was transparent. On a hardware-accelerated
         surface this renders as black until the WebView's first paint, causing a
