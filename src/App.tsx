@@ -658,7 +658,6 @@ const SaleReceipt = memo(function SaleReceipt({ sale, settings }: { sale: SaleDe
       <div className="text-center mb-3">
         <div className="text-lg font-bold">{settings.store_name ?? 'Mango Warrior'}</div>
         <div>{settings.store_address}</div>
-        <div>{settings.store_contact}</div>
       </div>
       <div className="border-t border-dashed border-gray-300 my-2" />
       <div className="flex justify-between"><span>Receipt:</span><span>{sale.receipt_number}</span></div>
@@ -792,7 +791,7 @@ function LoginPage() {
           ) : !selectedUser ? (
             <div className="flex flex-col gap-2">
               <p className="text-xs text-center text-gray-400 font-medium mb-1">Select your account to continue</p>
-              {(usersList ?? []).filter((u: User) => u.is_active).map((u: User) => (
+              {(usersList ?? []).map((u: User) => (
                 <button key={u.id}
                   onClick={() => { setSelectedUser(u); setPin(''); setError(''); }}
                   className="flex items-center gap-3 p-3 bg-gray-50 hover:bg-yellow-50 border border-gray-200
@@ -1151,6 +1150,14 @@ function POSPage() {
   const [mobileTab, setMobileTab] = useState<'menu' | 'cart'>('menu');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [addonPickerFor, setAddonPickerFor] = useState<{
+    cartKey: string;
+    currentAddons: CartAddon[];
+  } | null>(null);
+ 
+  const handleOpenAddonPicker = useCallback((cartKey: string, currentAddons: CartAddon[]) => {
+    setAddonPickerFor({ cartKey, currentAddons });
+  }, []);
 
   useEffect(() => {
     if (settings) {
@@ -1406,7 +1413,12 @@ function POSPage() {
             ) : (
               <div className="flex flex-col gap-2.5">
                 {cart.cart.items.map((item: CartItem) => (
-                  <CartItemRow key={item.cart_key} item={item} allAddons={allAddons} />
+                   <CartItemRow
+    key={item.cart_key}
+    item={item}
+    allAddons={allAddons}
+    onOpenAddonPicker={handleOpenAddonPicker}
+  />
                 ))}
               </div>
             )}
@@ -1547,32 +1559,47 @@ function POSPage() {
       {showShift && (
         <ShiftModal shift={shift ?? null} onClose={() => setShowShift(false)} />
       )}
+        {addonPickerFor && (
+    <CartAddonPickerModal
+      cartKey={addonPickerFor.cartKey}
+      currentAddons={addonPickerFor.currentAddons}
+      allAddons={allAddons}
+      onClose={() => setAddonPickerFor(null)}
+    />
+  )}
     </div>
   );
 }
 
 // ─── Cart Item Row — memoized, isolated from menu re-renders ──
-const CartItemRow = memo(function CartItemRow({ item, allAddons }: { item: CartItem; allAddons: Addon[] }) {
+const CartItemRow = memo(function CartItemRow({
+  item,
+  allAddons,
+  onOpenAddonPicker,
+}: {
+  item: CartItem;
+  allAddons: Addon[];
+  onOpenAddonPicker: (cartKey: string, currentAddons: CartAddon[]) => void;
+}) {
   const cart = useCartStore();
-  const [showAddonPicker, setShowAddonPicker] = useState(false);
-
+ 
   const accentColors = ['#F59E0B','#059669','#E11D48','#7C3AED','#0284C7','#EA580C','#DB2777','#0F766E'];
-  // Use item id hash for stable colour — don't recompute on position change
   const accentColor = useMemo(() => {
     const idx = item.item_id.charCodeAt(0) % accentColors.length;
     return accentColors[idx] ?? '#F59E0B';
   }, [item.item_id]);
-
-  const handleRemove = useCallback(() => cart.removeItem(item.cart_key), [cart, item.cart_key]);
-  const handleQtyMinus = useCallback(() => cart.updateQty(item.cart_key, -1), [cart, item.cart_key]);
-  const handleQtyPlus = useCallback(() => cart.updateQty(item.cart_key, 1), [cart, item.cart_key]);
-  const handleScToggle = useCallback(() => cart.setDiscount(item.cart_key, item.discount_type === 'sc' ? null : 'sc'), [cart, item.cart_key, item.discount_type]);
+ 
+  const handleRemove    = useCallback(() => cart.removeItem(item.cart_key), [cart, item.cart_key]);
+  const handleQtyMinus  = useCallback(() => cart.updateQty(item.cart_key, -1), [cart, item.cart_key]);
+  const handleQtyPlus   = useCallback(() => cart.updateQty(item.cart_key, 1),  [cart, item.cart_key]);
+  const handleScToggle  = useCallback(() => cart.setDiscount(item.cart_key, item.discount_type === 'sc'  ? null : 'sc'),  [cart, item.cart_key, item.discount_type]);
   const handlePwdToggle = useCallback(() => cart.setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd'), [cart, item.cart_key, item.discount_type]);
-
+  const handleAddonTap  = useCallback(() => onOpenAddonPicker(item.cart_key, item.addons), [onOpenAddonPicker, item.cart_key, item.addons]);
+ 
   return (
     <article className="cart-item-row rounded-2xl overflow-hidden border border-gray-200 bg-white shadow-sm" aria-label={`${item.item_name} in cart`}>
       <span className="block h-0.5 w-full" style={{ backgroundColor: accentColor }} />
-
+ 
       <div className="flex items-start justify-between gap-1.5 px-3 pt-2.5 pb-1">
         <span className="text-sm font-700 text-gray-900 leading-snug flex-1 min-w-0 truncate" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
           {item.item_name}
@@ -1592,7 +1619,7 @@ const CartItemRow = memo(function CartItemRow({ item, allAddons }: { item: CartI
           )}
         </div>
       </div>
-
+ 
       <div className="flex items-center gap-2 px-3 py-1.5">
         <div className="flex items-center gap-1 bg-gray-50 rounded-xl border border-gray-200 p-0.5">
           <button onClick={handleQtyMinus} aria-label={`Decrease quantity of ${item.item_name}`}
@@ -1608,9 +1635,9 @@ const CartItemRow = memo(function CartItemRow({ item, allAddons }: { item: CartI
             <Plus size={11} />
           </button>
         </div>
-
+ 
         <button
-          onClick={() => setShowAddonPicker(true)}
+          onClick={handleAddonTap}
           className="flex-1 flex items-center gap-1.5 text-xs font-600 transition-colors px-2.5 py-1.5 rounded-xl
             hover:bg-emerald-50 border border-dashed border-gray-200 hover:border-emerald-300 min-w-0"
           style={{ color: item.addons.length > 0 ? 'var(--leaf-green)' : '#9CA3AF', fontWeight: 600 }}
@@ -1626,13 +1653,13 @@ const CartItemRow = memo(function CartItemRow({ item, allAddons }: { item: CartI
             </span>
           )}
         </button>
-
+ 
         <button onClick={handleRemove} aria-label={`Remove ${item.item_name}`}
           className="w-7 h-7 rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 flex items-center justify-center transition-colors shrink-0">
           <X size={13} />
         </button>
       </div>
-
+ 
       <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
         <span className="text-xs text-gray-400 font-medium">Discount:</span>
         <button
@@ -1653,15 +1680,7 @@ const CartItemRow = memo(function CartItemRow({ item, allAddons }: { item: CartI
           </span>
         )}
       </div>
-
-      {showAddonPicker && (
-        <CartAddonPickerModal
-          cartKey={item.cart_key}
-          currentAddons={item.addons}
-          allAddons={allAddons}
-          onClose={() => setShowAddonPicker(false)}
-        />
-      )}
+      {/* CartAddonPickerModal is NO LONGER rendered here — it's in POSPage */}
     </article>
   );
 });

@@ -2,12 +2,54 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+
+    <!--
+      Viewport: width=device-width keeps layout correct on every screen size.
+      initial-scale=1 prevents iOS double-tap zoom.
+      viewport-fit=cover extends content into notch/punch-hole areas on modern phones.
+      user-scalable=no disables pinch-zoom (POS app; prevents accidental zooms mid-sale).
+      shrink-to-fit=no is an iOS 9 quirk-fix (harmless on Android).
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0,
+               minimum-scale=1.0, user-scalable=no, viewport-fit=cover,
+               shrink-to-fit=no"
+    />
+
+    <!-- Prevent phone-number / address auto-detection (causes layout reflow on Android) -->
+    <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
+
+    <!-- On Android WebView, this colour tints the system status bar to match the app bg -->
+    <meta name="theme-color" content="#111827" />
+
+    <!-- Capacitor apps are always installed — no need to be indexed by search engines -->
+    <meta name="robots" content="noindex, nofollow" />
+
+    <!--
+      Preconnect to the Cloudflare Workers API origin so the first API call
+      (menu fetch on mount) skips the TCP + TLS handshake cold-start.
+      Replace the href with your actual worker URL.
+    -->
+    <link rel="preconnect" href="https://pos-worker.mangowarrior-pos.workers.dev" crossorigin />
+
+    <!-- DNS prefetch as a fallback for browsers/WebViews that ignore preconnect -->
+    <link rel="dns-prefetch" href="https://pos-worker.mangowarrior-pos.workers.dev" />
+
     <title>MangoWarrior POS</title>
-    <script type="module" crossorigin src="/assets/index-Bw5onHSe.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-kzV05Il4.css">
+    <script type="module" crossorigin src="/assets/index-CWcL3fSk.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/query-CEHnkdob.js">
+    <link rel="modulepreload" crossorigin href="/assets/react-core-CrGZsIbW.js">
+    <link rel="modulepreload" crossorigin href="/assets/utils-VFaQ5x2i.js">
+    <link rel="modulepreload" crossorigin href="/assets/icons-Dn9aXKuN.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-CnfQo8xu.css">
   </head>
   <body>
+    <!--
+      #root must exist before the script runs.
+      No inline styles here — let index.css handle the base background so there
+      is no white flash while the JS bundle evaluates on slow devices.
+    -->
     <div id="root"></div>
   </body>
 </html>
