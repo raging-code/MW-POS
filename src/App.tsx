@@ -11,7 +11,7 @@ import {
   ArrowLeft, Save, ChevronRight, Coffee, Tag, Maximize, Minimize,
   ArrowUp, ArrowDown, FileText,
 } from 'lucide-react';
-import { useAuthStore, useCartStore, useUIStore, useCartTotal, useCartItemCount } from './store';
+import { useAuthStore, useCartStore, useUIStore, useCartTotal, useCartItemCount, useCartSubtotal, useCartDiscountTotal, useCartIsEmpty} from './store';
 import type {
   User, Category, MenuItem, Addon, CartItem, SaleDetail,
   SaleListItem, Shift, PaymentLine, PaymentMethod, Page,
@@ -40,6 +40,15 @@ import {
 } from './thermalPrint';
 
 // ─── Category colour palette ──────────────────────────────────
+// FIX C: Module-level constant — was incorrectly defined inside CartItemRow's
+// component body, causing a new 8-element array allocation on every render.
+// Moved here alongside CARD_COLOR_CLASSES (same pattern).
+// The useMemo in CartItemRow now has a stable dependency (no new array ref each render).
+const CART_ACCENT_COLORS = [
+  '#F59E0B','#059669','#E11D48','#7C3AED',
+  '#0284C7','#EA580C','#DB2777','#0F766E',
+] as const;
+
 const CARD_COLOR_CLASSES = [
   'ic-amber', 'ic-emerald', 'ic-rose', 'ic-violet',
   'ic-sky', 'ic-orange', 'ic-pink', 'ic-teal',
@@ -1031,7 +1040,11 @@ function CartAddonPickerModal({
 }: {
   cartKey: string; currentAddons: CartAddon[]; allAddons: Addon[]; onClose: () => void;
 }) {
-  const cart = useCartStore();
+  // FIX: Select only the setAddons action — it is a stable reference in Zustand
+  // so this selector never causes a re-render. The full useCartStore() subscription
+  // was causing this modal to re-render on every unrelated cart mutation (qty
+  // changes, discount toggles) even while it was open.
+  const setAddons = useCartStore(s => s.setAddons);
   const [selected, setSelected] = useState<CartAddon[]>(currentAddons.map(a => ({ ...a })));
 
   const toggleAddon = useCallback((addon: Addon) => {
@@ -1046,7 +1059,7 @@ function CartAddonPickerModal({
     setSelected(prev => prev.map(a => a.addon_id === addonId ? { ...a, qty: Math.max(1, a.qty + delta) } : a));
   }, []);
 
-  const handleApply = useCallback(() => { cart.setAddons(cartKey, selected); onClose(); }, [cart, cartKey, selected, onClose]);
+  const handleApply = useCallback(() => { setAddons(cartKey, selected); onClose(); }, [setAddons, cartKey, selected, onClose]);
   const availableAddons = useMemo(() => allAddons.filter(a => a.is_available), [allAddons]);
   const addonTotal = useMemo(() => selected.reduce((s, a) => s + a.addon_price * a.qty, 0), [selected]);
 
@@ -1167,6 +1180,24 @@ function POSPage() {
     if (noteDebounceRef.current) clearTimeout(noteDebounceRef.current);
     noteDebounceRef.current = setTimeout(() => cart.setNote(val), 300);
   }, [cart]);
+
+  // FIX A: Keep noteLocal in sync when cart.cart.note changes externally.
+  // This happens on two code paths:
+  //   1. Successful checkout → onSuccess() calls cart.clearCart() which resets
+  //      cart.cart.note to ''. Without this effect the textarea keeps showing
+  //      the previous order's note on the very next transaction.
+  //   2. Held-order restore → cart.loadFromHeld(order.data) replaces the entire
+  //      cart state including the note. Without this effect the textarea shows
+  //      the note from the *previous* session, not the restored one.
+  // The debounce guard prevents a race where an in-flight timer would snap the
+  // textarea back while the user is still typing.
+  const cartNote = cart.cart.note;
+  useEffect(() => {
+    // Only sync if the debounce timer is NOT active (user is not mid-keystroke).
+    if (!noteDebounceRef.current) {
+      setNoteLocal(cartNote);
+    }
+  }, [cartNote]);
  
   const handleOpenAddonPicker = useCallback((cartKey: string, currentAddons: CartAddon[]) => {
     setAddonPickerFor({ cartKey, currentAddons });
@@ -1236,10 +1267,16 @@ function POSPage() {
   // Fine-grained cart hooks — each subscribes to only one computed value.
   // useCartTotal() re-renders only when the cart total changes.
   // useCartItemCount() re-renders only when the total item count changes.
-  // Previously the inline useCartStore(s => s.total()) selectors still
-  // subscribed to the full store and re-rendered on every mutation.
-  const total = useCartTotal();
-  const itemCount = useCartItemCount();
+  // FIX B: Also subscribe to subtotal and discountTotal via their own hooks.
+  // Previously cart.subtotal() / cart.discountTotal() were called inline in JSX
+  // as methods on the full-store 'cart' reference — this is NOT a fine-grained
+  // subscription; POSPage still re-rendered on every cart mutation.
+  // useCartSubtotal() and useCartDiscountTotal() select the computed numbers
+  // so React skips re-renders when those values haven't changed.
+  const total         = useCartTotal();
+  const subtotal      = useCartSubtotal();
+  const discountTotal = useCartDiscountTotal();
+  const itemCount     = useCartItemCount();
   const heldCount = heldOrders?.length ?? 0;
 
   return (
@@ -1458,12 +1495,13 @@ function POSPage() {
             <div className="space-y-1 mb-3">
               <div className="flex justify-between text-xs text-gray-500">
                 <span className="font-medium">Subtotal</span>
-                <span className="font-semibold text-gray-700">{fmt(cart.subtotal())}</span>
+                {/* FIX B: use fine-grained hook variable — no full-store re-render */}
+                <span className="font-semibold text-gray-700">{fmt(subtotal)}</span>
               </div>
-              {cart.discountTotal() > 0 && (
+              {discountTotal > 0 && (
                 <div className="flex justify-between text-xs text-emerald-600">
                   <span className="font-medium">Discount</span>
-                  <span className="font-semibold">−{fmt(cart.discountTotal())}</span>
+                  <span className="font-semibold">−{fmt(discountTotal)}</span>
                 </div>
               )}
               <div className="flex justify-between items-baseline pt-1.5 border-t border-gray-100">
@@ -1609,10 +1647,11 @@ const CartItemRow = memo(function CartItemRow({
   const updateQty    = useCartStore(s => s.updateQty);
   const setDiscount  = useCartStore(s => s.setDiscount);
 
-  const accentColors = ['#F59E0B','#059669','#E11D48','#7C3AED','#0284C7','#EA580C','#DB2777','#0F766E'];
+  // FIX C: accentColors moved to module-level CART_ACCENT_COLORS constant
+  // (no longer allocated on every render). useMemo dependency is now stable.
   const accentColor = useMemo(() => {
-    const idx = item.item_id.charCodeAt(0) % accentColors.length;
-    return accentColors[idx] ?? '#F59E0B';
+    const idx = item.item_id.charCodeAt(0) % CART_ACCENT_COLORS.length;
+    return CART_ACCENT_COLORS[idx] ?? '#F59E0B';
   }, [item.item_id]);
 
   const handleRemove    = useCallback(() => removeItem(item.cart_key), [removeItem, item.cart_key]);
@@ -1788,10 +1827,19 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   shift: Shift | null | undefined; onClose: () => void; onSuccess: () => void;
 }) {
   const { user } = useAuthStore();
-  const cart = useCartStore();
-  const checkout = useCheckout();
+  // FIX: Replace full useCartStore() with targeted selectors.
+  // cart.total() called on the full store caused this modal to re-render on
+  // every cart mutation. useCartTotal() subscribes only to the computed total
+  // value and re-renders only when it actually changes.
+  const cartItems        = useCartStore(s => s.cart.items);
+  const cartNote         = useCartStore(s => s.cart.note);
+  const cartIdempotency  = useCartStore(s => s.cart.idempotency_key);
+  const discountTotal    = useCartDiscountTotal();
+  const cartSubtotal     = useCartSubtotal();
+  const cartClearCart    = useCartStore(s => s.clearCart);
+  const checkout         = useCheckout();
   const { data: settings } = useSettings();
-  const total = cart.total();
+  const total            = useCartTotal();
   const [payments, setPayments] = useState<PaymentLine[]>([{ method: 'cash', amount: total }]);
   const [tendered, setTendered] = useState('');
   const [step, setStep] = useState<'payment' | 'success'>('payment');
@@ -1824,14 +1872,14 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
     if (!user) return;
     try {
       const res = await checkout.mutateAsync({
-        idempotency_key: cart.cart.idempotency_key,
+        idempotency_key: cartIdempotency,
         shift_id: shift?.id,
         order_type: orderType,
-        note: cart.cart.note || undefined,
+        note: cartNote || undefined,
         tendered_amount: hasCash && tendered ? tenderedNum : undefined,
         actioned_by_user_id: user.id,
         actioned_by_name: user.name,
-        items: cart.cart.items.map((i: CartItem) => ({
+        items: cartItems.map((i: CartItem) => ({
           item_id: i.item_id, item_name: i.item_name, size_name: i.size_name,
           base_price: i.base_price, qty: i.qty,
           discount_type: i.discount_type ?? undefined,
@@ -1845,12 +1893,12 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
         cashier_id: user.id, cashier_name: user.name,
         order_type: orderType,
         status: 'completed', sale_type: 'normal',
-        total: res.total, discount_total: cart.discountTotal(), subtotal: cart.subtotal(),
+        total: res.total, discount_total: discountTotal, subtotal: cartSubtotal,
         created_at: new Date().toISOString(), is_reprinted: false,
-        shift_id: shift?.id ?? null, note: cart.cart.note || null,
+        shift_id: shift?.id ?? null, note: cartNote || null,
         tendered_amount: hasCash && tendered ? tenderedNum : null,
         change_amount: res.change,
-        items: cart.cart.items.map((i: CartItem) => ({
+        items: cartItems.map((i: CartItem) => ({
           id: '', item_name: i.item_name, size_name: i.size_name ?? null,
           base_price: i.base_price, qty: i.qty,
           discount_type: i.discount_type, discount_pct: i.discount_pct,
@@ -1864,7 +1912,8 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
     } catch (e: unknown) {
       toast(e instanceof Error ? e.message : 'Checkout failed', 'error');
     }
-  }, [user, cart, checkout, shift, orderType, hasCash, tendered, tenderedNum, payments]);
+  }, [user, cartItems, cartNote, cartIdempotency, discountTotal, cartSubtotal,
+      checkout, shift, orderType, hasCash, tendered, tenderedNum, payments]);
 
   return (
     <Modal
@@ -1936,9 +1985,9 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
                 {fmt(total)}
               </span>
             </div>
-            {cart.discountTotal() > 0 && (
+            {discountTotal > 0 && (
               <div className="flex justify-between text-xs text-emerald-700 mt-1 font-semibold">
-                <span>Discount applied</span><span>−{fmt(cart.discountTotal())}</span>
+                <span>Discount applied</span><span>−{fmt(discountTotal)}</span>
               </div>
             )}
           </div>
@@ -2063,29 +2112,42 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
   const { data: heldOrders, isLoading } = useHeldOrders();
   const createHeld = useCreateHeldOrder();
   const deleteHeld = useDeleteHeldOrder();
-  const cart = useCartStore();
+  // FIX: Replace full useCartStore() with fine-grained selectors.
+  // The full subscription caused this modal to re-render on every cart mutation
+  // (qty change, discount toggle) even though it only needs:
+  //   - isEmpty: to show/hide the "Park current order" button
+  //   - itemCount + total: for the display label
+  //   - clearCart + loadFromHeld: action calls (stable references)
+  //   - cart state snapshot: only at the moment the user taps "Park"
+  const cartIsEmpty    = useCartIsEmpty();
+  const cartItemCount  = useCartItemCount();
+  const cartTotal      = useCartTotal();
+  const clearCart      = useCartStore(s => s.clearCart);
+  const loadFromHeld   = useCartStore(s => s.loadFromHeld);
+  const getCartState   = () => useCartStore.getState().cart; // snapshot at park-time, not reactive
   const [label, setLabel] = useState('');
   const [showHoldForm, setShowHoldForm] = useState(false);
 
   const handleHold = async () => {
-    if (cart.cart.items.length === 0) return;
-    await createHeld.mutateAsync({ data: cart.cart, label: label || undefined });
-    cart.clearCart();
+    if (cartIsEmpty) return;
+    const cartSnapshot = useCartStore.getState().cart;
+    await createHeld.mutateAsync({ data: cartSnapshot, label: label || undefined });
+    clearCart();
     toast('Order parked');
     onClose();
   };
 
   const handleRestore = useCallback((order: HeldOrder) => {
-    cart.loadFromHeld(order.data);
+    loadFromHeld(order.data);
     deleteHeld.mutate(order.id);
     onRestore();
     toast('Order restored');
-  }, [cart, deleteHeld, onRestore]);
+  }, [loadFromHeld, deleteHeld, onRestore]);
 
   return (
     <Modal open onClose={onClose} title="📋 Parked Orders" maxWidth="max-w-md">
       <div className="flex flex-col gap-4">
-        {cart.cart.items.length > 0 && (
+        {!cartIsEmpty && (
           <div>
             {!showHoldForm ? (
               <button
@@ -2100,7 +2162,7 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
                     <div className="text-sm font-700 text-gray-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
                       Park current order
                     </div>
-                    <div className="text-xs text-gray-400">{cart.cart.items.length} items · {fmt(cart.total())}</div>
+                    <div className="text-xs text-gray-400">{cartItemCount} items · {fmt(cartTotal)}</div>
                   </div>
                 </div>
                 <ChevronRight size={15} className="text-gray-400" />
@@ -2108,7 +2170,7 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
             ) : (
               <div className="rounded-2xl p-4 border border-amber-200" style={{ backgroundColor: 'var(--mango-yellow-xl)' }}>
                 <p className="text-sm text-amber-900 mb-3 font-700" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-                  Parking {cart.cart.items.length} items · {fmt(cart.total())}
+                  Parking {cartItemCount} items · {fmt(cartTotal)}
                 </p>
                 <div className="flex gap-2">
                   <Input value={label} onChange={setLabel} placeholder="Label (optional)" className="flex-1" />

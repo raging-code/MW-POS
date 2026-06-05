@@ -66,12 +66,28 @@ export default defineConfig(({ mode }) => ({
 
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-core': ['react', 'react-dom'],
-          'query':      ['@tanstack/react-query'],
-          'icons':      ['lucide-react'],
-          'date-fns':   ['date-fns'],           // large, rarely updates
-          'utils':      ['clsx', 'zustand'],
+        // FIX: Use function form instead of object form.
+        // The object form is evaluated after esbuild's tree-shaking pass, which
+        // can inline date-fns into the main app chunk before Rollup has a chance
+        // to split it — so the date-fns chunk was never emitted in production.
+        // The function form runs at Rollup's chunk-assignment phase, forcing the
+        // split before tree-shaking collapses the module graph.
+        manualChunks(id) {
+          if (id.includes('node_modules/react-dom') || id.includes('node_modules/react/')) {
+            return 'react-core';
+          }
+          if (id.includes('node_modules/@tanstack/react-query')) {
+            return 'query';
+          }
+          if (id.includes('node_modules/lucide-react')) {
+            return 'icons';
+          }
+          if (id.includes('node_modules/date-fns')) {
+            return 'date-fns';
+          }
+          if (id.includes('node_modules/clsx') || id.includes('node_modules/zustand')) {
+            return 'utils';
+          }
         },
       },
     },

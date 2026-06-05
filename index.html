@@ -37,6 +37,25 @@
     -->
     <meta http-equiv="x-dns-prefetch-control" content="on" />
 
+    <!-- ── Favicons & PWA ──────────────────────────────────────────────── -->
+
+    <!-- Modern browsers: scalable SVG tab icon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Legacy browsers: .ico fallback (Chrome <80, IE, older Edge) -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="48x48" />
+
+    <!-- Standard PNG favicon (used by some tools, link previews, bookmarks) -->
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+
+    <!-- iOS "Add to Home Screen" icon -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- PWA manifest: enables "Add to Home Screen" prompt on Android Chrome -->
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- ── Preconnects ──────────────────────────────────────────────────── -->
+
     <!--
       Preconnect to the Cloudflare Workers API origin so the first API call
       (menu fetch on mount) skips the TCP + TLS handshake cold-start.

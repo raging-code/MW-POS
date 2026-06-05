@@ -20,11 +20,41 @@
     <!-- Prevent phone-number / address auto-detection (causes layout reflow on Android) -->
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
 
-    <!-- On Android WebView, this colour tints the system status bar to match the app bg -->
-    <meta name="theme-color" content="#111827" />
+    <!--
+      FIX: Was #111827 (near-black). The app's header background is #FFFFFF (white)
+      and the page background is #F0EDE8 (warm beige). Using #111827 caused the
+      Android system status bar to render dark even though the app header is white,
+      creating a jarring contrast. #FFFFFF matches the header the user sees first.
+    -->
+    <meta name="theme-color" content="#FFFFFF" />
 
     <!-- Capacitor apps are always installed — no need to be indexed by search engines -->
     <meta name="robots" content="noindex, nofollow" />
+
+    <!--
+      x-dns-prefetch-control on (some WebView forks disable DNS prefetch by default).
+      This meta tag re-enables it, making the preconnect/dns-prefetch hints below effective.
+    -->
+    <meta http-equiv="x-dns-prefetch-control" content="on" />
+
+    <!-- ── Favicons & PWA ──────────────────────────────────────────────── -->
+
+    <!-- Modern browsers: scalable SVG tab icon -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- Legacy browsers: .ico fallback (Chrome <80, IE, older Edge) -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="48x48" />
+
+    <!-- Standard PNG favicon (used by some tools, link previews, bookmarks) -->
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+
+    <!-- iOS "Add to Home Screen" icon -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- PWA manifest: enables "Add to Home Screen" prompt on Android Chrome -->
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!-- ── Preconnects ──────────────────────────────────────────────────── -->
 
     <!--
       Preconnect to the Cloudflare Workers API origin so the first API call
@@ -36,18 +66,40 @@
     <!-- DNS prefetch as a fallback for browsers/WebViews that ignore preconnect -->
     <link rel="dns-prefetch" href="https://pos-worker.mangowarrior-pos.workers.dev" />
 
+    <!--
+      Preconnect to Google Fonts so the font CSS + woff2 files load faster.
+      Without this, Plus Jakarta Sans / DM Sans are fetched cold on first paint,
+      causing FOIT on slow connections. `display=swap` (in index.css import) handles
+      the invisible-text fallback; preconnect handles the TCP cold-start.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
     <title>MangoWarrior POS</title>
-    <script type="module" crossorigin src="/assets/index-CWcL3fSk.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/query-CEHnkdob.js">
-    <link rel="modulepreload" crossorigin href="/assets/react-core-CrGZsIbW.js">
-    <link rel="modulepreload" crossorigin href="/assets/utils-VFaQ5x2i.js">
-    <link rel="modulepreload" crossorigin href="/assets/icons-Dn9aXKuN.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-CnfQo8xu.css">
+
+    <!--
+      Critical inline style to paint the correct background immediately.
+      Without this, Android WebView shows a white flash (the browser default
+      background) for ~100-200 ms while index.css loads and parses.
+      This tiny inline block matches `--surface-page: #F0EDE8` and body
+      background so there is zero visible transition.
+    -->
+    <style>
+      html, body, #root { background: #F0EDE8; }
+    </style>
+    <script type="module" crossorigin src="/assets/index-ClfGu-Wq.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/vendor-CafjmkfR.js">
+    <link rel="modulepreload" crossorigin href="/assets/react-core-D3euc0Cw.js">
+    <link rel="modulepreload" crossorigin href="/assets/query-Da1iV_5l.js">
+    <link rel="modulepreload" crossorigin href="/assets/utils-_EuERglx.js">
+    <link rel="modulepreload" crossorigin href="/assets/icons-BZ46l-QP.js">
+    <link rel="modulepreload" crossorigin href="/assets/date-fns-DqkCRz1U.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-BXw_4HqJ.css">
   </head>
   <body>
     <!--
       #root must exist before the script runs.
-      No inline styles here — let index.css handle the base background so there
+      The inline critical style above handles the base background so there
       is no white flash while the JS bundle evaluates on slow devices.
     -->
     <div id="root"></div>

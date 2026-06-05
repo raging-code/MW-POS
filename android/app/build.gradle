@@ -29,6 +29,16 @@
 apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 
+// Read signing credentials from local.properties so they are never committed.
+// local.properties is in .gitignore — add these keys to your local copy:
+//   KEY_STORE_PATH=C:/Users/eugen/mwposkey
+//   KEY_PASSWORD=<your password>
+def signingProps = new Properties()
+def signingPropsFile = rootProject.file('local.properties')
+if (signingPropsFile.exists()) {
+    signingPropsFile.withInputStream { signingProps.load(it) }
+}
+
 android {
     namespace = "com.mwpos.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -53,10 +63,12 @@ android {
 
     signingConfigs {
         release {
-            storeFile file("C:/Users/eugen/mwposkey")
-            storePassword "29567234"
-            keyAlias "key0"
-            keyPassword "29567234"
+            // Values come from android/local.properties (not committed to git).
+            // See the local.properties setup comment at the top of this file.
+            storeFile     file(signingProps.getProperty('KEY_STORE_PATH', ''))
+            storePassword signingProps.getProperty('KEY_PASSWORD', '')
+            keyAlias      signingProps.getProperty('KEY_ALIAS', 'key0')
+            keyPassword   signingProps.getProperty('KEY_PASSWORD', '')
         }
     }
 
