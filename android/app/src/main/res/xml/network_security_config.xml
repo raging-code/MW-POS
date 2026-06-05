@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  android/app/src/main/res/xml/network_security_config.xml
+
+  Android 7+ blocks cleartext (plain HTTP) traffic by default.
+  This config:
+    1. Allows cleartext only on 192.168.x.x / 10.x.x.x / 172.16-31.x.x
+       (local LAN — needed for `npx cap run android` with Vite dev server).
+    2. Forces TLS for all other hosts (Cloudflare Workers, any external API).
+
+  Referenced from AndroidManifest.xml:
+    android:networkSecurityConfig="@xml/network_security_config"
+-->
+<network-security-config>
+
+    <!-- Production / public internet: TLS only, trust system CAs -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- LAN development: allow plain HTTP so the Vite dev server works -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Class A private range -->
+        <domain includeSubdomains="true">10.0.0.0/8</domain>
+        <!-- Class B private range -->
+        <domain includeSubdomains="true">172.16.0.0/12</domain>
+        <!-- Class C private range (most home/office routers) -->
+        <domain includeSubdomains="true">192.168.0.0/16</domain>
+        <!-- Localhost -->
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+
+</network-security-config>

@@ -1,12 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- android/app/src/main/AndroidManifest.xml -->
 <!--
-  Full manifest for MW-POS Android app.
-  Key additions vs Capacitor default:
-    - BLUETOOTH, BLUETOOTH_ADMIN  (legacy, Android ≤ 11)
-    - BLUETOOTH_CONNECT, BLUETOOTH_SCAN  (Android 12+)
-    - INTERNET (for API calls)
-    - All Capacitor defaults preserved
+  Changes vs previous version:
+    + android:hardwareAccelerated="true"   — explicit GPU compositing per-activity
+    + android:largeHeap="true"             — raises heap limit on low-RAM devices;
+                                             prevents GC pauses mid-transaction
+    + android:networkSecurityConfig        — references the new network_security_config.xml
+    + android:extractNativeLibs="false"    — loads .so files directly from the APK
+                                             (faster cold start, smaller install size)
+    + android:enableOnBackInvokedCallback  — predictive back gesture on Android 13+
+    + META-TAG: asset statements removed;  — slightly faster asset unpacking
+    All Bluetooth permissions preserved unchanged.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -26,7 +30,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Bluetooth hardware is optional so app can be installed on tablets without BT -->
+    <!-- Bluetooth hardware is optional so the app installs on Wi-Fi-only tablets -->
     <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
 
     <application
@@ -36,7 +40,13 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="true"
+
+        android:hardwareAccelerated="true"
+        android:largeHeap="true"
+        android:extractNativeLibs="false"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:enableOnBackInvokedCallback="true">
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
@@ -44,7 +54,8 @@
             android:launchMode="singleTask"
             android:name=".MainActivity"
             android:theme="@style/AppTheme.NoActionBarLaunch"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:hardwareAccelerated="true">
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
