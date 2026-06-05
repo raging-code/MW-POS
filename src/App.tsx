@@ -782,8 +782,10 @@ function LoginPage() {
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--surface-page)' }}>
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-4 text-4xl"
-            style={{ backgroundColor: 'var(--mango-yellow)', boxShadow: 'var(--shadow-mango)' }}>🥭</div>
+<div className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-4 overflow-hidden"
+  style={{ backgroundColor: 'var(--mango-yellow)', boxShadow: 'var(--shadow-mango)' }}>
+  <img src="/MWIcon.png" alt="MW POS" className="w-full h-full object-contain" />
+</div>
           <h1 className="text-2xl font-900 mb-1" style={{ fontFamily: 'var(--font-display)', fontWeight: 900 }}>
             <span style={{ color: '#D97706' }}>Mango </span><span style={{ color: 'var(--warrior-red)' }}>Warrior</span>
           </h1>
@@ -940,8 +942,10 @@ function Header() {
       style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.05), 0 2px 8px rgba(0,0,0,0.04)' }}>
 
       <div className="font-black text-base mr-5 flex items-center gap-2 shrink-0" style={{ fontFamily: 'var(--font-display)' }}>
-        <div className="w-7 h-7 rounded-lg flex items-center justify-center text-sm shrink-0"
-          style={{ backgroundColor: 'var(--mango-yellow)' }}>🥭</div>
+<div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden"
+  style={{ backgroundColor: 'var(--mango-yellow)' }}>
+  <img src="/MWIcon.png" alt="MW POS" className="w-full h-full object-contain" />
+</div>
         <span className="hidden sm:inline">
           <span style={{ color: '#D97706' }}>Mango </span><span style={{ color: 'var(--warrior-red)' }}>Warrior</span>
         </span>
