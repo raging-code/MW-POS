@@ -36,7 +36,6 @@ export default defineConfig(({ mode }) => ({
   base: './',        
   plugins: [
     react(),                  // SWC-based: no babel config needed
-    splitVendorChunkPlugin(), // automatic vendor splitting on top of manualChunks
   ],
 
   server: {
