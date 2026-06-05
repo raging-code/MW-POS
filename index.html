@@ -1,64 +1,50 @@
-// capacitor.config.ts
-// Place this file in the ROOT of your MW-POS project (same level as package.json).
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
 
-import type { CapacitorConfig } from '@capacitor/cli';
+    <!--
+      Viewport: width=device-width keeps layout correct on every screen size.
+      initial-scale=1 prevents iOS double-tap zoom.
+      viewport-fit=cover extends content into notch/punch-hole areas on modern phones.
+      user-scalable=no disables pinch-zoom (POS app; prevents accidental zooms mid-sale).
+      shrink-to-fit=no is an iOS 9 quirk-fix (harmless on Android).
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0,
+               minimum-scale=1.0, user-scalable=no, viewport-fit=cover,
+               shrink-to-fit=no"
+    />
 
-const config: CapacitorConfig = {
-  // Must match the applicationId in android/app/build.gradle
-  appId: 'com.mwpos.app',
+    <!-- Prevent phone-number / address auto-detection (causes layout reflow on Android) -->
+    <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
 
-  // Displayed as the app name on the Android home screen
-  appName: 'MW POS',
+    <!-- On Android WebView, this colour tints the system status bar to match the app bg -->
+    <meta name="theme-color" content="#111827" />
 
-  // Vite builds into the "dist" folder — Capacitor copies it into the Android webview
-  webDir: 'dist',
+    <!-- Capacitor apps are always installed — no need to be indexed by search engines -->
+    <meta name="robots" content="noindex, nofollow" />
 
-  plugins: {
-    SplashScreen: {
-      // Hide splash screen immediately once the WebView is ready
-      launchShowDuration: 0,
-      // Prevents white flash between splash and app on slow devices
-      launchAutoHide: true,
-      backgroundColor: '#111827', // matches --bg-base in index.css
-      androidSplashResourceName: 'splash',
-      showSpinner: false,
-    },
-  },
+    <!--
+      Preconnect to the Cloudflare Workers API origin so the first API call
+      (menu fetch on mount) skips the TCP + TLS handshake cold-start.
+      Replace the href with your actual worker URL.
+    -->
+    <link rel="preconnect" href="https://mw-pos-worker.workers.dev" crossorigin />
 
-  android: {
-    // ── WebView performance flags ──────────────────────────────────────────
-    // Use the system Chromium WebView (updated via Play Store) instead of the
-    // slower built-in fallback on older Android versions.
-    // This gives hardware-accelerated CSS compositing on API 24+.
+    <!-- DNS prefetch as a fallback for browsers/WebViews that ignore preconnect -->
+    <link rel="dns-prefetch" href="https://mw-pos-worker.workers.dev" />
 
-    // Allow mixed HTTP/HTTPS only during local LAN dev; prod builds serve
-    // everything from the bundled dist/ so this is harmless there too.
-    allowMixedContent: true,
-
-    // Capture keyboard events inside the WebView (needed for barcode scanners
-    // that act as HID keyboards and for numeric PIN entry).
-    captureInput: true,
-
-    // Disable WebView debugging in production builds for a tiny perf boost and
-    // to prevent remote-debug access on end-user devices.
-    // Set to true during development: npx cap run android --flavor debug
-    webContentsDebuggingEnabled: false,
-
-    // ── Viewport / touch ─────────────────────────────────────────────────
-    // Already set in index.html but repeating here makes it apply even before
-    // the HTML is parsed, eliminating the double-render on first paint.
-    // initialFocus: false keeps the soft keyboard from auto-opening on load.
-    initialFocus: false,
-  },
-
-  // ── Dev server (local network development only) ───────────────────────────
-  // Uncomment and set your PC's LAN IP when running `npx cap run android`
-  // so the device loads the Vite dev server instead of a stale dist/.
-  //
-  // server: {
-  //   url: 'http://192.168.x.x:5173',
-  //   cleartext: true,   // needed for plain HTTP on LAN
-  // },
-};
-
-export default config;
+    <title>MangoWarrior POS</title>
+  </head>
+  <body>
+    <!--
+      #root must exist before the script runs.
+      No inline styles here — let index.css handle the base background so there
+      is no white flash while the JS bundle evaluates on slow devices.
+    -->
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
