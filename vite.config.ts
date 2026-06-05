@@ -33,6 +33,7 @@ import react from '@vitejs/plugin-react-swc'
 //     can eliminate dev-only code paths in libraries.
 
 export default defineConfig(({ mode }) => ({
+  base: './',        
   plugins: [
     react(),                  // SWC-based: no babel config needed
     splitVendorChunkPlugin(), // automatic vendor splitting on top of manualChunks
