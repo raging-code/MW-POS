@@ -2,6 +2,7 @@ name = "pos-worker"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
+account_id = "d2c1276fa8c98af957577e3a5cf8480f"
 
 [vars]
 TIMEZONE = "Asia/Manila"
