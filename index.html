@@ -20,14 +20,19 @@
     <!-- Prevent phone-number / address auto-detection (causes layout reflow on Android) -->
     <meta name="format-detection" content="telephone=no, date=no, address=no, email=no" />
 
-    <!-- On Android WebView, this colour tints the system status bar to match the app bg -->
-    <meta name="theme-color" content="#111827" />
+    <!--
+      FIX: Was #111827 (near-black). The app's header background is #FFFFFF (white)
+      and the page background is #F0EDE8 (warm beige). Using #111827 caused the
+      Android system status bar to render dark even though the app header is white,
+      creating a jarring contrast. #FFFFFF matches the header the user sees first.
+    -->
+    <meta name="theme-color" content="#FFFFFF" />
 
     <!-- Capacitor apps are always installed — no need to be indexed by search engines -->
     <meta name="robots" content="noindex, nofollow" />
 
     <!--
-      NEW: x-dns-prefetch-control on (some WebView forks disable DNS prefetch by default).
+      x-dns-prefetch-control on (some WebView forks disable DNS prefetch by default).
       This meta tag re-enables it, making the preconnect/dns-prefetch hints below effective.
     -->
     <meta http-equiv="x-dns-prefetch-control" content="on" />
@@ -43,7 +48,7 @@
     <link rel="dns-prefetch" href="https://pos-worker.mangowarrior-pos.workers.dev" />
 
     <!--
-      NEW: preconnect to Google Fonts so the font CSS + woff2 files load faster.
+      Preconnect to Google Fonts so the font CSS + woff2 files load faster.
       Without this, Plus Jakarta Sans / DM Sans are fetched cold on first paint,
       causing FOIT on slow connections. `display=swap` (in index.css import) handles
       the invisible-text fallback; preconnect handles the TCP cold-start.
@@ -54,7 +59,7 @@
     <title>MangoWarrior POS</title>
 
     <!--
-      NEW: critical inline style to paint the correct background immediately.
+      Critical inline style to paint the correct background immediately.
       Without this, Android WebView shows a white flash (the browser default
       background) for ~100-200 ms while index.css loads and parses.
       This tiny inline block matches `--surface-page: #F0EDE8` and body

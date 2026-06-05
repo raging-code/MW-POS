@@ -1154,6 +1154,19 @@ function POSPage() {
     cartKey: string;
     currentAddons: CartAddon[];
   } | null>(null);
+
+  // FIX: Local note state + debounce to prevent full POSPage re-render on every keystroke.
+  // cart.setNote() triggers a Zustand set() which re-renders POSPage (full store subscriber)
+  // including the entire menu grid. With a local useState the textarea feels instant, and
+  // the store only updates 300ms after the user stops typing.
+  const [noteLocal, setNoteLocal] = useState(cart.cart.note);
+  const noteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleNoteChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setNoteLocal(val);
+    if (noteDebounceRef.current) clearTimeout(noteDebounceRef.current);
+    noteDebounceRef.current = setTimeout(() => cart.setNote(val), 300);
+  }, [cart]);
  
   const handleOpenAddonPicker = useCallback((cartKey: string, currentAddons: CartAddon[]) => {
     setAddonPickerFor({ cartKey, currentAddons });
@@ -1430,8 +1443,8 @@ function POSPage() {
 
           <div className="px-3 pb-2 shrink-0">
             <textarea
-              value={cart.cart.note}
-              onChange={e => cart.setNote(e.target.value)}
+              value={noteLocal}
+              onChange={handleNoteChange}
               placeholder="Special instructions…"
               rows={2}
               className="w-full bg-gray-50 border border-gray-200 text-gray-700 rounded-xl px-3 py-2.5 text-xs
@@ -1585,19 +1598,28 @@ const CartItemRow = memo(function CartItemRow({
   allAddons: Addon[];
   onOpenAddonPicker: (cartKey: string, currentAddons: CartAddon[]) => void;
 }) {
-  const cart = useCartStore();
- 
+  // FIX: Select only the three action functions from the cart store.
+  // CartItemRow is memo'd and never reads cart STATE — it only calls actions.
+  // Subscribing to the full store caused every CartItemRow to re-render on
+  // every cart mutation (qty change, discount toggle, note edit) even when
+  // the row's own item data hadn't changed.
+  // Zustand action functions are stable references (created once), so this
+  // selector never triggers a re-render on its own.
+  const removeItem   = useCartStore(s => s.removeItem);
+  const updateQty    = useCartStore(s => s.updateQty);
+  const setDiscount  = useCartStore(s => s.setDiscount);
+
   const accentColors = ['#F59E0B','#059669','#E11D48','#7C3AED','#0284C7','#EA580C','#DB2777','#0F766E'];
   const accentColor = useMemo(() => {
     const idx = item.item_id.charCodeAt(0) % accentColors.length;
     return accentColors[idx] ?? '#F59E0B';
   }, [item.item_id]);
- 
-  const handleRemove    = useCallback(() => cart.removeItem(item.cart_key), [cart, item.cart_key]);
-  const handleQtyMinus  = useCallback(() => cart.updateQty(item.cart_key, -1), [cart, item.cart_key]);
-  const handleQtyPlus   = useCallback(() => cart.updateQty(item.cart_key, 1),  [cart, item.cart_key]);
-  const handleScToggle  = useCallback(() => cart.setDiscount(item.cart_key, item.discount_type === 'sc'  ? null : 'sc'),  [cart, item.cart_key, item.discount_type]);
-  const handlePwdToggle = useCallback(() => cart.setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd'), [cart, item.cart_key, item.discount_type]);
+
+  const handleRemove    = useCallback(() => removeItem(item.cart_key), [removeItem, item.cart_key]);
+  const handleQtyMinus  = useCallback(() => updateQty(item.cart_key, -1), [updateQty, item.cart_key]);
+  const handleQtyPlus   = useCallback(() => updateQty(item.cart_key, 1),  [updateQty, item.cart_key]);
+  const handleScToggle  = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'sc'  ? null : 'sc'),  [setDiscount, item.cart_key, item.discount_type]);
+  const handlePwdToggle = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd'), [setDiscount, item.cart_key, item.discount_type]);
   const handleAddonTap  = useCallback(() => onOpenAddonPicker(item.cart_key, item.addons), [onOpenAddonPicker, item.cart_key, item.addons]);
  
   return (
@@ -2721,7 +2743,10 @@ function SalesPage() {
                     onClick={() => setSelectedId(s => s === sale.id ? null : sale.id)}
                     aria-pressed={selectedId === sale.id}
                     className={clsx(
-                      'w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-gray-50',
+                      // cv-row: content-visibility:auto — browser skips paint/layout for off-screen rows.
+                      // Defined in index.css. On a busy day with 100+ transactions this cuts the
+                      // initial render cost of the list to only the ~10 visible rows.
+                      'cv-row w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-gray-50',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 focus-visible:ring-inset',
                       selectedId === sale.id && 'border-l-[3px]'
                     )}
@@ -3233,7 +3258,7 @@ function AdminAuditPage() {
             {logs.map((log: AuditLog) => {
               const { title, detail } = formatAuditEntry(log);
               return (
-                <div key={log.id} className="bg-white border border-gray-150 rounded-2xl px-4 py-3.5 shadow-sm">
+                <div key={log.id} className="cv-row bg-white border border-gray-150 rounded-2xl px-4 py-3.5 shadow-sm">
                   <div className="flex items-start gap-3">
                     <span className="text-xl shrink-0 mt-0.5">{entityIcon(log.entity_type)}</span>
                     <div className="flex-1 min-w-0">

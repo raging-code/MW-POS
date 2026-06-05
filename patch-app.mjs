@@ -1,25 +1,34 @@
 #!/usr/bin/env node
-// patch-app.mjs
-// Run from the project root:   node patch-app.mjs
+// patch-app2.mjs
+// Run from the project root:   node patch-app2.mjs
 //
-// Applies two targeted fixes to src/App.tsx:
+// Applies three targeted fixes to src/App.tsx:
 //
-//   FIX 1 (line ~14): Add fine-grained cart hooks to the store import.
-//          useCartTotal and useCartItemCount are already exported from
-//          store.ts but never imported in App.tsx. POSPage still calls
-//          useCartStore(s => s.total()) and useCartStore(s => s.cart.items.reduce(...))
-//          which subscribe to the full store object.
+//   FIX 1 — CartItemRow: replace full useCartStore() with action-only selector.
+//     CartItemRow is memoized but subscribes to the entire cart store.
+//     It only CALLS actions (removeItem, updateQty, setDiscount) — it never
+//     READS cart state. So every time any cart item changes (qty, discount,
+//     note), all CartItemRow instances re-render even though their data didn't
+//     change. Selecting only the three action functions (which are stable
+//     references in Zustand) means CartItemRow re-renders only when its own
+//     `item` prop changes.
 //
-//   FIX 2 (lines ~1223-1225): Replace the two inline useCartStore selectors
-//          in POSPage with the stable hooks. This means POSPage's total/itemCount
-//          vars only cause a re-render when those specific values change, not on
-//          every cart mutation (discount toggle, note update, etc.).
+//   FIX 2 — Note textarea: debounce setNote to stop full POSPage re-renders
+//     on every keystroke.
+//     POSPage subscribes to useCartStore() (full store). Every character typed
+//     in the "Special instructions" textarea calls cart.setNote() which
+//     triggers a Zustand set(), which re-renders POSPage — including the entire
+//     menu grid. A 300ms debounce using a local useRef timer means the store
+//     only updates after the user pauses typing. The textarea shows the live
+//     value via local useState so it feels instant.
 //
-//   FIX 3 (lines ~3803-3811): Replace the eager pageMap object literal with
-//          a switch/conditional that only instantiates the current page.
-//          Previously all 7 page components were mounted simultaneously and their
-//          React Query hooks fired on mount — SalesPage was making API calls
-//          even while the cashier was on the POS screen.
+//   FIX 3 — Add cv-row class to sales list rows and audit log rows.
+//     index.css defines `.cv-row { content-visibility: auto; contain-intrinsic-size: 0 80px; }`
+//     which tells the browser to skip paint and layout for rows that are
+//     off-screen. This class was defined but never applied in JSX.
+//     Adding it to the sales list <button> and audit log <div> rows means
+//     the browser only renders the ~8-10 rows visible in the viewport,
+//     not all 100+ rows in a busy day's transaction list.
 
 import fs from 'fs';
 import path from 'path';
@@ -27,99 +36,156 @@ import path from 'path';
 const filePath = path.resolve('src/App.tsx');
 let src = fs.readFileSync(filePath, 'utf8');
 
-// ─── FIX 1: Update store import ──────────────────────────────────────────────
-const OLD_IMPORT = `import { useAuthStore, useCartStore, useUIStore } from './store';`;
-const NEW_IMPORT = `import { useAuthStore, useCartStore, useUIStore, useCartTotal, useCartItemCount } from './store';`;
+// ─── FIX 1: CartItemRow — action-only selector ───────────────────────────────
+const OLD_CART_ITEM_ROW_STORE = `  const cart = useCartStore();
+ 
+  const accentColors = ['#F59E0B','#059669','#E11D48','#7C3AED','#0284C7','#EA580C','#DB2777','#0F766E'];
+  const accentColor = useMemo(() => {
+    const idx = item.item_id.charCodeAt(0) % accentColors.length;
+    return accentColors[idx] ?? '#F59E0B';
+  }, [item.item_id]);
+ 
+  const handleRemove    = useCallback(() => cart.removeItem(item.cart_key), [cart, item.cart_key]);
+  const handleQtyMinus  = useCallback(() => cart.updateQty(item.cart_key, -1), [cart, item.cart_key]);
+  const handleQtyPlus   = useCallback(() => cart.updateQty(item.cart_key, 1),  [cart, item.cart_key]);
+  const handleScToggle  = useCallback(() => cart.setDiscount(item.cart_key, item.discount_type === 'sc'  ? null : 'sc'),  [cart, item.cart_key, item.discount_type]);
+  const handlePwdToggle = useCallback(() => cart.setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd'), [cart, item.cart_key, item.discount_type]);
+  const handleAddonTap  = useCallback(() => onOpenAddonPicker(item.cart_key, item.addons), [onOpenAddonPicker, item.cart_key, item.addons]);`;
 
-if (!src.includes(OLD_IMPORT)) {
-  console.error('FIX 1 FAILED: Could not find store import line. Already patched?');
+const NEW_CART_ITEM_ROW_STORE = `  // FIX: Select only the three action functions from the cart store.
+  // CartItemRow is memo'd and never reads cart STATE — it only calls actions.
+  // Subscribing to the full store caused every CartItemRow to re-render on
+  // every cart mutation (qty change, discount toggle, note edit) even when
+  // the row's own item data hadn't changed.
+  // Zustand action functions are stable references (created once), so this
+  // selector never triggers a re-render on its own.
+  const removeItem   = useCartStore(s => s.removeItem);
+  const updateQty    = useCartStore(s => s.updateQty);
+  const setDiscount  = useCartStore(s => s.setDiscount);
+
+  const accentColors = ['#F59E0B','#059669','#E11D48','#7C3AED','#0284C7','#EA580C','#DB2777','#0F766E'];
+  const accentColor = useMemo(() => {
+    const idx = item.item_id.charCodeAt(0) % accentColors.length;
+    return accentColors[idx] ?? '#F59E0B';
+  }, [item.item_id]);
+
+  const handleRemove    = useCallback(() => removeItem(item.cart_key), [removeItem, item.cart_key]);
+  const handleQtyMinus  = useCallback(() => updateQty(item.cart_key, -1), [updateQty, item.cart_key]);
+  const handleQtyPlus   = useCallback(() => updateQty(item.cart_key, 1),  [updateQty, item.cart_key]);
+  const handleScToggle  = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'sc'  ? null : 'sc'),  [setDiscount, item.cart_key, item.discount_type]);
+  const handlePwdToggle = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd'), [setDiscount, item.cart_key, item.discount_type]);
+  const handleAddonTap  = useCallback(() => onOpenAddonPicker(item.cart_key, item.addons), [onOpenAddonPicker, item.cart_key, item.addons]);`;
+
+if (!src.includes(OLD_CART_ITEM_ROW_STORE)) {
+  console.error('FIX 1 FAILED: Could not find CartItemRow store block. Already patched?');
   process.exit(1);
 }
-src = src.replace(OLD_IMPORT, NEW_IMPORT);
-console.log('✓ FIX 1 applied: store import updated');
+src = src.replace(OLD_CART_ITEM_ROW_STORE, NEW_CART_ITEM_ROW_STORE);
+console.log('✓ FIX 1 applied: CartItemRow now uses action-only selectors');
 
-// ─── FIX 2: Replace inline selectors in POSPage ──────────────────────────────
-const OLD_SELECTORS = `  // useCartStore selectors — only subscribe to what we need
-  const total = useCartStore(s => s.total());
-  const itemCount = useCartStore(s => s.cart.items.reduce((acc, i) => acc + i.qty, 0));`;
+// ─── FIX 2: Note textarea debounce ───────────────────────────────────────────
+// Step 2a: Add noteRef and noteDebounceRef to POSPage state declarations
+const OLD_POSPAGE_REFS = `  const searchRef = useRef<HTMLInputElement>(null);
+  const [addonPickerFor, setAddonPickerFor] = useState<{
+    cartKey: string;
+    currentAddons: CartAddon[];
+  } | null>(null);`;
 
-const NEW_SELECTORS = `  // Fine-grained cart hooks — each subscribes to only one computed value.
-  // useCartTotal() re-renders only when the cart total changes.
-  // useCartItemCount() re-renders only when the total item count changes.
-  // Previously the inline useCartStore(s => s.total()) selectors still
-  // subscribed to the full store and re-rendered on every mutation.
-  const total = useCartTotal();
-  const itemCount = useCartItemCount();`;
+const NEW_POSPAGE_REFS = `  const searchRef = useRef<HTMLInputElement>(null);
+  const [addonPickerFor, setAddonPickerFor] = useState<{
+    cartKey: string;
+    currentAddons: CartAddon[];
+  } | null>(null);
 
-if (!src.includes(OLD_SELECTORS)) {
-  console.error('FIX 2 FAILED: Could not find inline selector block. Already patched?');
+  // FIX: Local note state + debounce to prevent full POSPage re-render on every keystroke.
+  // cart.setNote() triggers a Zustand set() which re-renders POSPage (full store subscriber)
+  // including the entire menu grid. With a local useState the textarea feels instant, and
+  // the store only updates 300ms after the user stops typing.
+  const [noteLocal, setNoteLocal] = useState(cart.cart.note);
+  const noteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleNoteChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setNoteLocal(val);
+    if (noteDebounceRef.current) clearTimeout(noteDebounceRef.current);
+    noteDebounceRef.current = setTimeout(() => cart.setNote(val), 300);
+  }, [cart]);`;
+
+if (!src.includes(OLD_POSPAGE_REFS)) {
+  console.error('FIX 2a FAILED: Could not find POSPage refs block. Already patched?');
   process.exit(1);
 }
-src = src.replace(OLD_SELECTORS, NEW_SELECTORS);
-console.log('✓ FIX 2 applied: POSPage useCartStore selectors replaced with fine-grained hooks');
+src = src.replace(OLD_POSPAGE_REFS, NEW_POSPAGE_REFS);
+console.log('✓ FIX 2a applied: noteLocal state and debounce handler added to POSPage');
 
-// ─── FIX 3: Lazy-render AppShell pageMap ─────────────────────────────────────
-const OLD_PAGEMAP = `  const pageMap: Partial<Record<Page, React.ReactNode>> = {
-    pos:               <POSPage />,
-    sales:             <SalesPage />,
-    admin_dashboard:   <AdminDashboardPage />,
-    admin_menu:        <AdminMenuPage />,
-    admin_employees:   <AdminEmployeesPage />,
-    admin_settings:    <AdminSettingsPage />,
-    admin_audit:       <AdminAuditPage />,
-  };
+// Step 2b: Replace the textarea to use local state and debounced handler
+const OLD_NOTE_TEXTAREA = `            <textarea
+              value={cart.cart.note}
+              onChange={e => cart.setNote(e.target.value)}
+              placeholder="Special instructions…"
+              rows={2}
+              className="w-full bg-gray-50 border border-gray-200 text-gray-700 rounded-xl px-3 py-2.5 text-xs
+                focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20
+                placeholder-gray-350 resize-none font-medium transition-colors"
+            />`;
 
-  const adminPages: Page[] = ['admin_dashboard','admin_menu','admin_employees','admin_settings','admin_audit'];
-  const currentPage: Page = adminPages.includes(page) && user?.role !== 'admin' ? 'pos' : page;
+const NEW_NOTE_TEXTAREA = `            <textarea
+              value={noteLocal}
+              onChange={handleNoteChange}
+              placeholder="Special instructions…"
+              rows={2}
+              className="w-full bg-gray-50 border border-gray-200 text-gray-700 rounded-xl px-3 py-2.5 text-xs
+                focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20
+                placeholder-gray-350 resize-none font-medium transition-colors"
+            />`;
 
-  return (
-    <div className="w-full h-full flex flex-col" style={{ background: 'var(--surface-page)' }}>
-      <Header />
-      <main className="flex-1 overflow-hidden" role="main">
-        {pageMap[currentPage] ?? <POSPage />}
-      </main>
-      <PinModal />
-    </div>
-  );`;
-
-const NEW_PAGEMAP = `  // FIX: Replaced eager pageMap object with lazy rendering.
-  // Previously all 7 page components were instantiated on every AppShell
-  // render, meaning all their useQuery hooks fired simultaneously — SalesPage
-  // and AdminDashboardPage were making API calls even while the cashier was
-  // on the POS screen. Now only the current page is mounted.
-  const adminPages: Page[] = ['admin_dashboard','admin_menu','admin_employees','admin_settings','admin_audit'];
-  const currentPage: Page = adminPages.includes(page) && user?.role !== 'admin' ? 'pos' : page;
-
-  function renderPage() {
-    switch (currentPage) {
-      case 'pos':               return <POSPage />;
-      case 'sales':             return <SalesPage />;
-      case 'admin_dashboard':   return <AdminDashboardPage />;
-      case 'admin_menu':        return <AdminMenuPage />;
-      case 'admin_employees':   return <AdminEmployeesPage />;
-      case 'admin_settings':    return <AdminSettingsPage />;
-      case 'admin_audit':       return <AdminAuditPage />;
-      default:                  return <POSPage />;
-    }
-  }
-
-  return (
-    <div className="w-full h-full flex flex-col" style={{ background: 'var(--surface-page)' }}>
-      <Header />
-      <main className="flex-1 overflow-hidden" role="main">
-        {renderPage()}
-      </main>
-      <PinModal />
-    </div>
-  );`;
-
-if (!src.includes(OLD_PAGEMAP)) {
-  console.error('FIX 3 FAILED: Could not find pageMap block. Already patched?');
+if (!src.includes(OLD_NOTE_TEXTAREA)) {
+  console.error('FIX 2b FAILED: Could not find note textarea. Already patched?');
   process.exit(1);
 }
-src = src.replace(OLD_PAGEMAP, NEW_PAGEMAP);
-console.log('✓ FIX 3 applied: AppShell pageMap replaced with lazy renderPage()');
+src = src.replace(OLD_NOTE_TEXTAREA, NEW_NOTE_TEXTAREA);
+console.log('✓ FIX 2b applied: note textarea now uses debounced local state');
+
+// ─── FIX 3a: cv-row on sales list rows ───────────────────────────────────────
+const OLD_SALES_ROW = `                  <button key={sale.id}
+                    onClick={() => setSelectedId(s => s === sale.id ? null : sale.id)}
+                    aria-pressed={selectedId === sale.id}
+                    className={clsx(
+                      'w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-gray-50',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 focus-visible:ring-inset',
+                      selectedId === sale.id && 'border-l-[3px]'
+                    )}`;
+
+const NEW_SALES_ROW = `                  <button key={sale.id}
+                    onClick={() => setSelectedId(s => s === sale.id ? null : sale.id)}
+                    aria-pressed={selectedId === sale.id}
+                    className={clsx(
+                      // cv-row: content-visibility:auto — browser skips paint/layout for off-screen rows.
+                      // Defined in index.css. On a busy day with 100+ transactions this cuts the
+                      // initial render cost of the list to only the ~10 visible rows.
+                      'cv-row w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-gray-50',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 focus-visible:ring-inset',
+                      selectedId === sale.id && 'border-l-[3px]'
+                    )}`;
+
+if (!src.includes(OLD_SALES_ROW)) {
+  console.error('FIX 3a FAILED: Could not find sales list row className. Already patched?');
+  process.exit(1);
+}
+src = src.replace(OLD_SALES_ROW, NEW_SALES_ROW);
+console.log('✓ FIX 3a applied: cv-row added to sales list rows');
+
+// ─── FIX 3b: cv-row on audit log rows ────────────────────────────────────────
+const OLD_AUDIT_ROW = `                <div key={log.id} className="bg-white border border-gray-150 rounded-2xl px-4 py-3.5 shadow-sm">`;
+
+const NEW_AUDIT_ROW = `                <div key={log.id} className="cv-row bg-white border border-gray-150 rounded-2xl px-4 py-3.5 shadow-sm">`;
+
+if (!src.includes(OLD_AUDIT_ROW)) {
+  console.error('FIX 3b FAILED: Could not find audit log row className. Already patched?');
+  process.exit(1);
+}
+src = src.replace(OLD_AUDIT_ROW, NEW_AUDIT_ROW);
+console.log('✓ FIX 3b applied: cv-row added to audit log rows');
 
 // ─── Write output ─────────────────────────────────────────────────────────────
 fs.writeFileSync(filePath, src, 'utf8');
-console.log('\n✅ All 3 fixes applied to src/App.tsx');
+console.log('\n✅ All fixes applied to src/App.tsx');
