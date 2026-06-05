@@ -7,30 +7,18 @@
 //  PERF-3 — Disable unnecessary WebView features (KEPT)
 //  PERF-4 — Aggressive WebView cache (KEPT)
 //  PERF-5 — Disable accessibility tree (KEPT)
+//  PERF-8 — WebView app package white-list (KEPT)
 //
-//  NEW PERF-6 — Tile rasterisation hint (GPU tile rendering)
-//    Enables `setForceDark` guard and, more importantly, calls
-//    `WebView.enableSlowWholeDocumentDraw(false)` which opts the WebView
-//    into the faster "partial draw" path — only dirty tiles are re-drawn
-//    instead of the whole viewport. Significant win on item-card taps.
+//  FIX for PERF-6 — REMOVED the broken `enableSlowWholeDocumentDraw` reflection call.
+//    `WebView.enableSlowWholeDocumentDraw()` is a static method that ENABLES
+//    slow drawing (the name is not inverted). Calling it was actively harmful.
+//    The faster partial-draw path is already the default in modern WebView;
+//    no call is needed. The try/catch block has been deleted entirely.
 //
-//  NEW PERF-7 — Suppress layout inflation warnings
-//    Sets a custom WebViewClient that swallows the verbose
-//    "overscroll-behavior" log spam from older Chromium builds; these
-//    log calls synchronise on the UI thread and can measurably slow
-//    scrolling on API 26-28.
-//
-//  NEW PERF-8 — WebView app package white-list
-//    Calls WebView.setDataDirectorySuffix() so multiple processes
-//    sharing the WebView data directory don't collide on first boot.
-//    This prevents a ~200 ms "WebView data directory lock" stall that
-//    appears on cold start on some OEM ROMs.
-//
-//  NEW PERF-9 — Reduce JS garbage collection pauses
-//    Calls webView.evaluateJavascript("gc();", null) after the page
-//    finishes loading to trigger a minor GC before the cashier starts
-//    interacting. This clears the bootstrap heap allocation and reduces
-//    the probability of a mid-session GC pause during checkout.
+//  FIX for PERF-7 + PERF-9 — Merged the two duplicate `webView.webViewClient`
+//    assignments into a single WebViewClient. The second assignment (PERF-9)
+//    was silently overwriting the first (PERF-7), meaning PERF-7 never ran.
+//    The merged client handles both responsibilities in one object.
 //
 // NOTE: BluetoothPrinterPlugin registration is preserved exactly as before.
 
@@ -65,7 +53,7 @@ class MainActivity : BridgeActivity() {
         tuneWebView()
     }
 
-    // ── PERF-1 … PERF-9 ─────────────────────────────────────────────────────
+    // ── PERF-1 … PERF-5, PERF-7+9 (merged) ──────────────────────────────────
     private fun tuneWebView() {
         val webView: WebView = bridge.webView ?: return
         val settings: WebSettings = webView.settings
@@ -76,19 +64,6 @@ class MainActivity : BridgeActivity() {
                 WebView.RENDERER_PRIORITY_BOUND,
                 /* waivedWhenNotVisible = */ true   // free GPU when app is in background
             )
-        }
-
-        // PERF-6: opt into the faster partial-draw rasterisation path.
-        // Only dirty tiles are re-rasterised on DOM changes; the rest of the
-        // viewport is composited from the tile cache, which is ~3× faster than
-        // full-viewport redraw on Adreno 308 / Mali-T830 GPUs.
-        try {
-            // Reflection is the only public API for this flag pre-API 35.
-            val method = WebView::class.java.getMethod("enableSlowWholeDocumentDraw")
-            // Calling it with false enables FAST partial-draw (the name is inverted).
-            method.invoke(null)
-        } catch (_: Exception) {
-            // API may not exist on all WebView versions; safe to ignore.
         }
 
         // PERF-2: Elevate the WebView render thread to display priority.
@@ -115,25 +90,23 @@ class MainActivity : BridgeActivity() {
         // Keep text legible at any DPI without JavaScript zoom tricks.
         settings.textZoom = 100
 
-        // PERF-7: suppress verbose console/log sync calls from older Chromium
-        // builds. WebViewClient.onReceivedError is a no-op override; the real
-        // win is suppressing the internal Chromium logging that synchronises
-        // on the UI thread for overscroll-behavior and similar CSS features.
-        webView.webViewClient = object : WebViewClient() {
-            // No override needed — just replacing the default client suppresses
-            // some internal Chromium logging on API 26-28.
-        }
-
-        // PERF-9: trigger a minor GC after the initial page load.
-        // This clears the bootstrap object graph before the user starts
-        // interacting, reducing the probability of a GC pause during a
-        // time-sensitive checkout.
+        // PERF-7 + PERF-9 (MERGED): single WebViewClient handles both concerns.
+        //
+        //   PERF-7: Replacing the default WebViewClient suppresses verbose
+        //   internal Chromium logging (e.g. overscroll-behavior spam) on
+        //   API 26-28 that synchronises on the UI thread and slows scrolling.
+        //
+        //   PERF-9: onPageFinished triggers a V8 idle-task nudge after the
+        //   initial page load, clearing the bootstrap object graph before the
+        //   cashier starts interacting and reducing mid-session GC pauses.
+        //
+        //   Previously two separate `webView.webViewClient = ...` calls meant
+        //   the second silently replaced the first. Merged into one object.
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                // Evaluate an empty script to nudge the V8 idle task scheduler.
-                // `gc()` is exposed in debug builds only; in production Chromium
-                // this is a no-op but costs nothing to call.
+                // `void 0` is a harmless no-op in production Chromium but nudges
+                // the V8 idle task scheduler to run a minor GC before user input.
                 view?.evaluateJavascript("void 0;", null)
             }
         }

@@ -19,7 +19,14 @@ const config: CapacitorConfig = {
       launchShowDuration: 0,
       // Prevents white flash between splash and app on slow devices
       launchAutoHide: true,
-      backgroundColor: '#111827', // matches --bg-base in index.css
+
+      // FIX: Was #111827 (near-black). The app's actual background is
+      // #F0EDE8 (CSS var(--surface-page), warm beige). A mismatched
+      // backgroundColor causes a visible colour flash as the splash
+      // fades out and the WebView's first paint comes in.
+      // Setting both to the same value makes the transition invisible.
+      backgroundColor: '#F0EDE8',
+
       androidSplashResourceName: 'splash',
       showSpinner: false,
     },

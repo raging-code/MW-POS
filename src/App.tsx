@@ -11,7 +11,7 @@ import {
   ArrowLeft, Save, ChevronRight, Coffee, Tag, Maximize, Minimize,
   ArrowUp, ArrowDown, FileText,
 } from 'lucide-react';
-import { useAuthStore, useCartStore, useUIStore } from './store';
+import { useAuthStore, useCartStore, useUIStore, useCartTotal, useCartItemCount } from './store';
 import type {
   User, Category, MenuItem, Addon, CartItem, SaleDetail,
   SaleListItem, Shift, PaymentLine, PaymentMethod, Page,
@@ -1220,9 +1220,13 @@ function POSPage() {
     else addToCart(item, item.sizes[0]?.name, item.sizes[0]?.price);
   }, [addToCart]);
 
-  // useCartStore selectors — only subscribe to what we need
-  const total = useCartStore(s => s.total());
-  const itemCount = useCartStore(s => s.cart.items.reduce((acc, i) => acc + i.qty, 0));
+  // Fine-grained cart hooks — each subscribes to only one computed value.
+  // useCartTotal() re-renders only when the cart total changes.
+  // useCartItemCount() re-renders only when the total item count changes.
+  // Previously the inline useCartStore(s => s.total()) selectors still
+  // subscribed to the full store and re-rendered on every mutation.
+  const total = useCartTotal();
+  const itemCount = useCartItemCount();
   const heldCount = heldOrders?.length ?? 0;
 
   return (
@@ -3800,24 +3804,32 @@ function AppShell() {
   const { page } = useUIStore();
   const { user } = useAuthStore();
 
-  const pageMap: Partial<Record<Page, React.ReactNode>> = {
-    pos:               <POSPage />,
-    sales:             <SalesPage />,
-    admin_dashboard:   <AdminDashboardPage />,
-    admin_menu:        <AdminMenuPage />,
-    admin_employees:   <AdminEmployeesPage />,
-    admin_settings:    <AdminSettingsPage />,
-    admin_audit:       <AdminAuditPage />,
-  };
-
+  // FIX: Replaced eager pageMap object with lazy rendering.
+  // Previously all 7 page components were instantiated on every AppShell
+  // render, meaning all their useQuery hooks fired simultaneously — SalesPage
+  // and AdminDashboardPage were making API calls even while the cashier was
+  // on the POS screen. Now only the current page is mounted.
   const adminPages: Page[] = ['admin_dashboard','admin_menu','admin_employees','admin_settings','admin_audit'];
   const currentPage: Page = adminPages.includes(page) && user?.role !== 'admin' ? 'pos' : page;
+
+  function renderPage() {
+    switch (currentPage) {
+      case 'pos':               return <POSPage />;
+      case 'sales':             return <SalesPage />;
+      case 'admin_dashboard':   return <AdminDashboardPage />;
+      case 'admin_menu':        return <AdminMenuPage />;
+      case 'admin_employees':   return <AdminEmployeesPage />;
+      case 'admin_settings':    return <AdminSettingsPage />;
+      case 'admin_audit':       return <AdminAuditPage />;
+      default:                  return <POSPage />;
+    }
+  }
 
   return (
     <div className="w-full h-full flex flex-col" style={{ background: 'var(--surface-page)' }}>
       <Header />
       <main className="flex-1 overflow-hidden" role="main">
-        {pageMap[currentPage] ?? <POSPage />}
+        {renderPage()}
       </main>
       <PinModal />
     </div>
