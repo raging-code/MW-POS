@@ -1,0 +1,20 @@
+--- a/src/api.ts
++++ b/src/api.ts
+@@ -47,7 +47,7 @@
+   token?: string | null
+ ): Promise<T> {
+   const headers: Record<string, string> = {
+-    'Content-Type': 'application/json',
++    ...(opts.body != null ? { 'Content-Type': 'application/json' } : {}),
+     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+     ...(opts.headers as Record<string, string> ?? {}),
+   }
+@@ -77,7 +77,7 @@
+ export function useUsersList() {
+   return useQuery({
+     queryKey: ['users-list'],
+-    queryFn: ({ signal }) => apiFetch<User[]>('/auth/users', { signal }),
++    queryFn: ({ signal }) => apiFetch<User[]>('/auth/users', { method: 'GET', signal }),
+   })
+ }
+ 
