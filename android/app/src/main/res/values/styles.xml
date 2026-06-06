@@ -3,25 +3,24 @@
 
     <!-- Base application theme. -->
     <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
-        <!-- Customize your theme here. -->
         <item name="colorPrimary">@color/colorPrimary</item>
         <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
         <item name="colorAccent">@color/colorAccent</item>
     </style>
 
     <!--
-        FIX: Changed android:background from @null to the app's warm-beige page
-        background (#F0EDE8 = CSS var(surface-page)).
-
-        With @null the window background was transparent. On a hardware-accelerated
-        surface this renders as black until the WebView's first paint, causing a
-        visible black flash on cold start and on activity resume on slower devices
-        (Adreno 308 / Mali-T830). Setting the window background to the same colour
-        as the app body eliminates the flash entirely.
+        FIX (system-bar overlap):
+          windowFullscreen  — hides the status bar at the top.
+          windowLayoutInDisplayCutoutMode shortEdges — lets content run into
+            display cutout (notch) areas on API 28+ so nothing is clipped.
+          android:background matches the app's warm-beige surface (#F0EDE8)
+            to prevent a colour flash on cold start / activity resume.
     -->
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
         <item name="android:background">#F0EDE8</item>
     </style>
 
