@@ -1532,7 +1532,7 @@ function POSPage() {
                 size="md"
                 fullWidth
                 onClick={() => setShowCheckout(true)}
-                disabled={cart.cart.items.length === 0}
+                disabled={itemCount === 0}
                 title="Proceed to payment (Ctrl+Enter)"
               >
                 <Receipt size={15} />
