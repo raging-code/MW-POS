@@ -109,7 +109,7 @@ export interface SaleItemDetail {
   addons: SaleItemAddon[];
 }
 
-export type SaleStatus = 'completed' | 'voided' | 'refunded' | 'deleted';
+export type SaleStatus = 'completed' | 'voided' | 'refunded' | 'soft_deleted';
 export type SaleType = 'normal' | 'missed';
 
 export interface SaleDetail {

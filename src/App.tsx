@@ -2760,7 +2760,11 @@ function SalesPage() {
   }, [saleDetail, deleteReason, softDelete, refetch]);
 
   const statusColor = useCallback((s: string) =>
+    // FIXED: explicit 'soft_deleted' mapping so the badge never renders the raw DB value
     s === 'completed' ? 'green' : s === 'voided' ? 'red' : s === 'refunded' ? 'yellow' : 'gray', []);
+
+  const statusLabel = useCallback((s: string) =>
+    s === 'completed' ? 'Completed' : s === 'voided' ? 'Voided' : s === 'refunded' ? 'Refunded' : s === 'soft_deleted' ? 'Deleted' : s, []);
 
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
@@ -2818,7 +2822,7 @@ function SalesPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-gray-900 font-mono font-700 text-sm" style={{ fontWeight: 700 }}>{sale.receipt_number}</span>
-                        <Badge color={statusColor(sale.status)}>{sale.status}</Badge>
+                        <Badge color={statusColor(sale.status)}>{statusLabel(sale.status)}</Badge>
                         {sale.sale_type === 'missed' && <Badge color="yellow">missed</Badge>}
                       </div>
                       <div className="text-gray-400 text-xs mt-0.5 font-medium">{fmtDate(sale.created_at)}</div>

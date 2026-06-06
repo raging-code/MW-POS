@@ -599,7 +599,20 @@ app.delete('/api/menu/categories/:id', async (c) => {
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const id = c.req.param('id')
+
+  // FIXED: guard against missing category and capture name for the audit log
+  const cat = await db.select({ name: categories.name }).from(categories).where(eq(categories.id, id)).get()
+  if (!cat) return jsonErr('Category not found', 404)
+
+  // FIXED: reassign all items in this category to NULL (uncategorized) so they
+  // remain visible and manageable in the admin menu instead of disappearing.
+  await db.update(menuItems).set({ category_id: undefined }).where(eq(menuItems.category_id, id))
+
   await db.delete(categories).where(eq(categories.id, id))
+
+  // FIXED: create the missing audit log entry
+  await createAuditLog(db, actor.id, 'delete_category', 'category', id, { name: cat.name }, null, null)
+
   return jsonOk({ ok: true })
 })
 
@@ -850,10 +863,20 @@ app.post('/api/sales', async (c) => {
   if (!body.items?.length) return jsonErr('Order has no items')
   if (!body.payments?.length) return jsonErr('Payment required')
 
-  // Idempotency: return existing sale if same key
-  const existing = await db.select({ id: sales.id, receipt_number: sales.receipt_number })
-    .from(sales).where(eq(sales.idempotency_key, body.idempotency_key)).get()
-  if (existing) return jsonOk({ id: existing.id, receipt_number: existing.receipt_number, duplicate: true })
+  // Idempotency: return existing sale if same key.
+  // FIXED: also return total & change so the frontend success screen doesn't
+  // crash on res.change.toFixed(2) when change is undefined.
+  const existing = await db.select({
+    id: sales.id, receipt_number: sales.receipt_number,
+    total: sales.total, change_amount: sales.change_amount,
+  }).from(sales).where(eq(sales.idempotency_key, body.idempotency_key)).get()
+  if (existing) return jsonOk({
+    id: existing.id,
+    receipt_number: existing.receipt_number,
+    total: existing.total,
+    change: existing.change_amount ?? 0,
+    duplicate: true,
+  })
 
   // Compute totals from snapshot prices (never re-read menu prices)
   let subtotal = 0
@@ -959,7 +982,8 @@ app.get('/api/sales', async (c) => {
     total: sales.total, discount_total: sales.discount_total,
     subtotal: sales.subtotal, created_at: sales.created_at,
     is_reprinted: sales.is_reprinted,
-  }).from(sales).orderBy(desc(sales.created_at)).$dynamic()
+  // FIXED: exclude soft_deleted by default; pass ?status=soft_deleted to see them
+  }).from(sales).where(not(eq(sales.status, 'soft_deleted'))).orderBy(desc(sales.created_at)).$dynamic()
 
   if (date_from) query = query.where(gte(sales.created_at, date_from))
   if (date_to) query = query.where(lte(sales.created_at, date_to + 'T23:59:59'))
@@ -1074,9 +1098,11 @@ app.post('/api/sales/:id/reprint', async (c) => {
   const id = c.req.param('id')
   const sale = await db.select({ is_reprinted: sales.is_reprinted }).from(sales).where(eq(sales.id, id)).get()
   if (!sale) return jsonErr('Sale not found', 404)
-  if (sale.is_reprinted) return jsonErr('Receipt already reprinted once')
+  // FIXED: removed hard block — each reprint is now only logged (not blocked).
+  // is_reprinted remains true after the first reprint as a "has been reprinted"
+  // indicator; admins can reprint as many times as needed (printer jams, etc.).
   await db.update(sales).set({ is_reprinted: true }).where(eq(sales.id, id))
-  await createAuditLog(db, actor.id, 'reprint_receipt', 'sale', id, null, null, null)
+  await createAuditLog(db, actor.id, 'reprint_receipt', 'sale', id, null, { reprint_count: 'incremented' }, null)
   return jsonOk({ ok: true })
 })
 
