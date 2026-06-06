@@ -553,8 +553,19 @@ function PinModal() {
     return () => clearInterval(iv);
   }, [locked]);
 
-  // FIX: doSubmit and press declared BEFORE the useEffect that references
-  // `press` in its deps array — required by TypeScript (TS2448/TS2454).
+  useEffect(() => {
+    if (!pinModal.open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key >= '0' && e.key <= '9') press(e.key);
+      else if (e.key === 'Backspace') press('DEL');
+      else if (e.key === 'Escape') resolvePinModal({ verified: false });
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // press is stable-within-each-render because it useCallback-depends on `pin`.
+  // Including it here ensures the handler always closes over the latest `press`.
+  }, [pinModal.open, press, resolvePinModal]);
+
   const doSubmit = useCallback(async (pinValue: string) => {
     if (!user) return;
     if (pinLockoutState.isLocked()) {
@@ -575,6 +586,7 @@ function PinModal() {
       setPin('');
     }
   }, [user, verifyPin, pinModal.required_role, resolvePinModal]);
+
   const press = useCallback((val: string) => {
     if (locked) return;
     if (val === 'DEL') { setPin(p => p.slice(0, -1)); setError(''); return; }
@@ -583,18 +595,6 @@ function PinModal() {
     setPin(next); setError('');
     if (next.length === 6) setTimeout(() => doSubmit(next), 50);
   }, [locked, pin, doSubmit]);
-  useEffect(() => {
-    if (!pinModal.open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key >= '0' && e.key <= '9') press(e.key);
-      else if (e.key === 'Backspace') press('DEL');
-      else if (e.key === 'Escape') resolvePinModal({ verified: false });
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  // press is stable-within-each-render because it useCallback-depends on `pin`.
-  // Including it here ensures the handler always closes over the latest `press`.
-  }, [pinModal.open, press, resolvePinModal]);
 
   return (
     <Modal
