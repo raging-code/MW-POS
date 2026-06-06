@@ -3964,7 +3964,7 @@ export default function App() {
 
   useEffect(() => {
     if (user && token) {
-      fetch(`${import.meta.env.VITE_API_URL ?? ''}/auth/me`, {
+      fetch(`${(import.meta.env.VITE_API_URL ?? '').replace(/\/api$/, '')}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then(res => { if (!res.ok) logout() })
