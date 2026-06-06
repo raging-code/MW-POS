@@ -257,15 +257,6 @@ function addHours(h: number): string {
   return new Date(Date.now() + h * 3_600_000).toISOString()
 }
 
-// FIX E: convert a Manila (UTC+8) calendar date string ("YYYY-MM-DD") to a
-// UTC ISO boundary suitable for comparing against stored created_at values.
-// Without this, date-range queries miss the first 8 h of each day (00:00–07:59
-// Manila time) and may include the first 8 h of the following day.
-function manilaToUTC(dateStr: string, boundary: 'start' | 'end'): string {
-  const time = boundary === 'start' ? 'T00:00:00.000+08:00' : 'T23:59:59.999+08:00'
-  return new Date(dateStr + time).toISOString()
-}
-
 function jsonOk(data: unknown, status = 200): Response {
   return Response.json({ data, error: null }, { status })
 }
@@ -277,10 +268,8 @@ function jsonErr(msg: string, status = 400): Response {
 // Generate unique receipt number: MW-YYYYMMDD-NNNN
 // Uses INSERT ... ON CONFLICT DO UPDATE to atomically increment
 async function generateReceiptNumber(d1: D1Database): Promise<string> {
-  // FIX D: Manila is UTC+8. Shift by 8 h before slicing the ISO string so
-  // receipts before 08:00 Manila time don't carry yesterday's date.
-  const manilaDate = new Date(Date.now() + 8 * 3_600_000)
-  const dateKey = manilaDate.toISOString().slice(0, 10).replace(/-/g, '')
+  const today = new Date()
+  const dateKey = today.toISOString().slice(0, 10).replace(/-/g, '')
   const result = await d1.prepare(`
     INSERT INTO receipt_counters (date_key, last_number) VALUES (?, 1)
     ON CONFLICT(date_key) DO UPDATE SET last_number = last_number + 1
@@ -327,14 +316,11 @@ async function recordPinFail(db: DrizzleD1Database, identifier: string) {
   const rec = await db.select().from(pinAttempts).where(eq(pinAttempts.identifier, identifier)).get()
   const attempts = (rec?.attempts ?? 0) + 1
   const locked_until = attempts >= 5 ? addHours(0.25) : null // 15-min lockout after 5 fails
-  // FIX H: pass locked_until directly (null when attempts < 5).
-  // null ?? undefined = undefined which Drizzle drops from SET, leaving a
-  // stale locked_until in place. Passing null generates SET locked_until = NULL.
   await db.insert(pinAttempts).values({
-    identifier, attempts, locked_until: locked_until, updated_at: nowISO(),
+    identifier, attempts, locked_until: locked_until ?? undefined, updated_at: nowISO(),
   }).onConflictDoUpdate({
     target: pinAttempts.identifier,
-    set: { attempts, locked_until: locked_until, updated_at: nowISO() },
+    set: { attempts, locked_until: locked_until ?? undefined, updated_at: nowISO() },
   })
 }
 
@@ -484,8 +470,7 @@ app.post('/api/users', async (c) => {
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const body = await c.req.json<{ name: string; role: 'crew' | 'admin'; pin: string }>()
-  // FIX F: require exactly 6 decimal digits — pure-length check allows "ABCDEF"
-  if (!body.name || !body.pin || !/^\d{6}$/.test(body.pin)) return jsonErr('Name and 6-digit numeric PIN required')
+  if (!body.name || !body.pin || body.pin.length !== 6) return jsonErr('Name and 6-digit PIN required')
   const hash = await hashPin(body.pin)
   const id = uid()
   await db.insert(users).values({ id, name: body.name, role: body.role, pin_hash: hash, created_by: actor.id, created_at: nowISO() })
@@ -501,13 +486,7 @@ app.put('/api/users/:id', async (c) => {
   const body = await c.req.json<{ name?: string; role?: 'crew' | 'admin'; is_active?: boolean }>()
   const existing = await db.select().from(users).where(eq(users.id, id)).get()
   if (!existing) return jsonErr('User not found', 404)
-  // FIX C: whitelist — only name, role, is_active may be updated.
-  // Spreading the raw body could let a caller overwrite pin_hash or created_by.
-  const safeFields: Partial<typeof users.$inferInsert> = {}
-  if (body.name      !== undefined) safeFields.name      = body.name
-  if (body.role      !== undefined) safeFields.role      = body.role
-  if (body.is_active !== undefined) safeFields.is_active = body.is_active
-  await db.update(users).set(safeFields).where(eq(users.id, id))
+  await db.update(users).set({ ...body }).where(eq(users.id, id))
   await createAuditLog(db, actor.id, 'update_user', 'user', id, existing, body, null)
   if (body.is_active === false) {
     // Invalidate all sessions for this user
@@ -536,8 +515,7 @@ app.post('/api/users/:id/reset-pin', async (c) => {
   const db = c.get('db')
   const id = c.req.param('id')
   const body = await c.req.json<{ new_pin: string }>()
-  // FIX F: require exactly 6 decimal digits
-  if (!body.new_pin || !/^\d{6}$/.test(body.new_pin)) return jsonErr('6-digit numeric PIN required')
+  if (!body.new_pin || body.new_pin.length !== 6) return jsonErr('6-digit PIN required')
   const hash = await hashPin(body.new_pin)
   await db.update(users).set({ pin_hash: hash }).where(eq(users.id, id))
   await createAuditLog(db, actor.id, 'reset_pin', 'user', id, null, null, null)
@@ -634,10 +612,7 @@ app.delete('/api/menu/categories/:id', async (c) => {
 
   // FIXED: reassign all items in this category to NULL (uncategorized) so they
   // remain visible and manageable in the admin menu instead of disappearing.
-  // FIX A: use null so Drizzle emits SET category_id = NULL.
-  // undefined is omitted from the SET clause, leaving items with a dangling
-  // FK reference that makes them invisible in every menu query.
-  await db.update(menuItems).set({ category_id: null }).where(eq(menuItems.category_id, id))
+  await db.update(menuItems).set({ category_id: undefined }).where(eq(menuItems.category_id, id))
 
   await db.delete(categories).where(eq(categories.id, id))
 
@@ -810,12 +785,6 @@ app.post('/api/shifts/:id/cash-drop', async (c) => {
   const shift_id = c.req.param('id')
   const body = await c.req.json<{ amount: number; reason: string }>()
   if (!body.reason) return jsonErr('Reason required')
-  // FIX G: validate amount is a positive finite number
-  if (!body.amount || body.amount <= 0 || !isFinite(body.amount)) return jsonErr('Amount must be a positive number')
-  // FIX G: validate shift exists and is still open
-  const shiftRec = await db.select({ status: shifts.status }).from(shifts).where(eq(shifts.id, shift_id)).get()
-  if (!shiftRec) return jsonErr('Shift not found', 404)
-  if (shiftRec.status !== 'open') return jsonErr('Cannot add a cash drop to a closed shift')
   const id = uid()
   await db.insert(cashDrops).values({ id, shift_id, user_id: actor.id, amount: body.amount, reason: body.reason, created_at: nowISO() })
   await createAuditLog(db, actor.id, 'cash_drop', 'shift', shift_id, null, { amount: body.amount, reason: body.reason }, body.reason)
@@ -1035,8 +1004,8 @@ app.get('/api/sales', async (c) => {
       : baseSelect.where(not(eq(sales.status, 'soft_deleted')))
   ).orderBy(desc(sales.created_at)).$dynamic()
 
-  if (date_from) query = query.where(gte(sales.created_at, manilaToUTC(date_from, 'start')))
-  if (date_to)   query = query.where(lte(sales.created_at, manilaToUTC(date_to,   'end')))
+  if (date_from) query = query.where(gte(sales.created_at, date_from))
+  if (date_to)   query = query.where(lte(sales.created_at, date_to + 'T23:59:59.999'))
   // FIX 2: apply order_type filter (was parsed but discarded)
   if (order_type) query = query.where(eq(sales.order_type, order_type as typeof sales.order_type._.data))
   if (receipt)   query = query.where(eq(sales.receipt_number, receipt))
@@ -1183,8 +1152,6 @@ app.get('/api/sales/:id', async (c) => {
 // POST /api/sales/:id/void
 app.post('/api/sales/:id/void', async (c) => {
   const actor = c.get('user')
-  // FIX B: void is a financial action — admin only
-  if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const id = c.req.param('id')
   const body = await c.req.json<{ reason: string }>()
@@ -1200,8 +1167,6 @@ app.post('/api/sales/:id/void', async (c) => {
 // POST /api/sales/:id/refund
 app.post('/api/sales/:id/refund', async (c) => {
   const actor = c.get('user')
-  // FIX B: refund is a financial action — admin only
-  if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const id = c.req.param('id')
   const body = await c.req.json<{ reason: string }>()
@@ -1263,8 +1228,8 @@ app.get('/api/reports/sales', async (c) => {
     not(eq(sales.status, 'soft_deleted'))
   ).$dynamic()
 
-  if (date_from) salesQuery = salesQuery.where(gte(sales.created_at, manilaToUTC(date_from, 'start')))
-  if (date_to) salesQuery = salesQuery.where(lte(sales.created_at, manilaToUTC(date_to, 'end')))
+  if (date_from) salesQuery = salesQuery.where(gte(sales.created_at, date_from))
+  if (date_to) salesQuery = salesQuery.where(lte(sales.created_at, date_to + 'T23:59:59'))
 
   const salesList = await salesQuery
   const completedSales = salesList.filter(s => s.status === 'completed')
@@ -1323,9 +1288,8 @@ app.get('/api/reports/sales-detailed', async (c) => {
     return jsonErr(`Invalid parameters: period=${period}, date=${date}, year=${year}, month=${month}`, 400)
   }
 
-  // FIX E: use Manila→UTC conversion so daily periods cover 00:00–23:59 Manila time
-  const from = manilaToUTC(startDate, 'start')
-  const to   = manilaToUTC(endDate,   'end')
+  const from = startDate + 'T00:00:00.000Z'
+  const to   = endDate   + 'T23:59:59.999Z'
 
   const salesList = await db.select({
     id: sales.id,
@@ -1479,8 +1443,8 @@ app.get('/api/audit-logs', async (c) => {
 
   if (entity_type) query = query.where(eq(auditLogs.entity_type, entity_type))
   if (entity_id) query = query.where(eq(auditLogs.entity_id, entity_id))
-  if (date_from) query = query.where(gte(auditLogs.created_at, manilaToUTC(date_from, 'start')))
-  if (date_to) query = query.where(lte(auditLogs.created_at, manilaToUTC(date_to, 'end')))
+  if (date_from) query = query.where(gte(auditLogs.created_at, date_from))
+  if (date_to) query = query.where(lte(auditLogs.created_at, date_to + 'T23:59:59'))
 
   const logs = await query.limit(500)
   return jsonOk(logs)
