@@ -3275,7 +3275,7 @@ function AdminAuditPage() {
 
   const actionColor = useCallback((action: string) => {
     if (action.includes('delete') || action.includes('void') || action.includes('remove')) return 'red';
-    if (action.includes('create') || action.includes('open') || action.includes('clock_in')) return 'green';
+    if (action.includes('create') || action.includes('open')) return 'green';
     if (action.includes('update') || action.includes('edit') || action.includes('reset') || action.includes('close')) return 'yellow';
     return 'gray';
   }, []);

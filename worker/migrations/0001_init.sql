@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS sale_payments (
 );
 
 -- ============================================================
--- AUDIT & TIME LOGS
+-- AUDIT LOGS
 -- ============================================================
 CREATE TABLE IF NOT EXISTS audit_logs (
   id TEXT PRIMARY KEY,
@@ -172,16 +172,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   old_value TEXT,
   new_value TEXT,
   reason TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS time_logs (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id),
-  clock_in TEXT NOT NULL,
-  clock_out TEXT,
-  edited_by TEXT REFERENCES users(id),
-  edit_reason TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -225,7 +215,6 @@ CREATE INDEX IF NOT EXISTS idx_sale_items_sale      ON sale_items(sale_id);
 CREATE INDEX IF NOT EXISTS idx_sale_payments_sale   ON sale_payments(sale_id);
 CREATE INDEX IF NOT EXISTS idx_audit_entity         ON audit_logs(entity_type, entity_id);
 CREATE INDEX IF NOT EXISTS idx_audit_user           ON audit_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_time_logs_user       ON time_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_held_orders_expiry   ON held_orders(expires_at);
 CREATE INDEX IF NOT EXISTS idx_menu_items_category  ON menu_items(category_id);
 
@@ -239,5 +228,4 @@ INSERT OR IGNORE INTO system_settings(key, value) VALUES
   ('store_address',     '123 Mango St, Dasmariñas, Cavite'),
   ('store_contact',     '09XX-XXX-XXXX'),
   ('receipt_footer',    'Thank you for visiting MangoWarrior!'),
-  ('hourly_rate',       '80'),
   ('timezone',          'Asia/Manila');

@@ -188,7 +188,6 @@ export interface Settings {
   receipt_footer: string;
   sc_discount_pct: string;
   pwd_discount_pct: string;
-  hourly_rate: string;
   [key: string]: string;
 }
 
