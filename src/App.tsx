@@ -386,11 +386,13 @@ const inAppLockout    = createPinLockout(); // PinModal + AnyUserPinModal
 
 // ─── Any-User PIN Modal ────────────────────────────────────────
 function AnyUserPinModal({
-  open, onClose, onSuccess, title, description,
+  open, onClose, onSuccess, title, description, required_role,
 }: {
   open: boolean; onClose: () => void;
   onSuccess: (result: { user_id: string; user_name: string; role: string }) => void;
   title: string; description: string;
+  /** Bug #13a: enforce a minimum role before the backend rejects with 403 */
+  required_role?: 'admin';
 }) {
   const { data: usersList } = useUsersList();
   const verifyPin = useVerifyPin();
@@ -419,12 +421,18 @@ function AnyUserPinModal({
       setLocked(true); setLockSecs(inAppLockout.secondsLeft()); setPin(''); return;
     }
     try {
-      await verifyPin.mutateAsync({ user_id: user.id, pin: pinValue });
+      await verifyPin.mutateAsync({ user_id: user.id, pin: pinValue, required_role });
       inAppLockout.reset();
       onSuccess({ user_id: user.id, user_name: user.name, role: user.role });
-    } catch {
+    } catch (err) {
+      // Bug #4a: surface real backend message (e.g. rate-limit "Try again after…")
+      const serverMsg = err instanceof Error ? err.message : '';
+      const isBackendLock = serverMsg.toLowerCase().includes('try again after') ||
+                            serverMsg.toLowerCase().includes('too many');
       inAppLockout.increment();
-      if (inAppLockout.isLocked()) {
+      if (isBackendLock) {
+        setError(serverMsg);
+      } else if (inAppLockout.isLocked()) {
         setLocked(true); setLockSecs(inAppLockout.secondsLeft());
         setError(`Too many attempts. Locked for ${inAppLockout.secondsLeft()}s.`);
       } else {
@@ -432,7 +440,7 @@ function AnyUserPinModal({
       }
       setPin('');
     }
-  }, [verifyPin, onSuccess]);
+  }, [verifyPin, onSuccess, required_role]);
 
   const press = useCallback((val: string) => {
     if (locked || !selectedUser) return;
@@ -572,9 +580,15 @@ function PinModal() {
       await verifyPin.mutateAsync({ user_id: user.id, pin: pinValue, required_role: pinModal.required_role });
       inAppLockout.reset();
       resolvePinModal({ verified: true, user_id: user.id, user_name: user.name, role: user.role });
-    } catch {
+    } catch (err) {
+      // Bug #4b: surface real backend message (e.g. rate-limit "Try again after…")
+      const serverMsg = err instanceof Error ? err.message : '';
+      const isBackendLock = serverMsg.toLowerCase().includes('try again after') ||
+                            serverMsg.toLowerCase().includes('too many');
       inAppLockout.increment();
-      if (inAppLockout.isLocked()) {
+      if (isBackendLock) {
+        setError(serverMsg);
+      } else if (inAppLockout.isLocked()) {
         setLocked(true); setLockSecs(inAppLockout.secondsLeft());
         setError(`Too many attempts. Locked for ${inAppLockout.secondsLeft()}s.`);
       } else {
@@ -764,9 +778,15 @@ function LoginPage() {
       pinLockoutState.reset();
       authLogin(res.user, res.token);
       navigate(res.user.role === 'admin' ? 'admin_dashboard' : 'pos');
-    } catch {
+    } catch (err) {
+      // Bug #4c: surface real backend message (e.g. rate-limit "Try again after…")
+      const serverMsg = err instanceof Error ? err.message : '';
+      const isBackendLock = serverMsg.toLowerCase().includes('try again after') ||
+                            serverMsg.toLowerCase().includes('too many');
       pinLockoutState.increment();
-      if (pinLockoutState.isLocked()) {
+      if (isBackendLock) {
+        setError(serverMsg);
+      } else if (pinLockoutState.isLocked()) {
         setLocked(true); setLockSecs(pinLockoutState.secondsLeft());
         setError(`Too many attempts. Locked for ${pinLockoutState.secondsLeft()}s.`);
       } else {
@@ -929,6 +949,8 @@ function Header() {
     queryClient.clear();   // flush cached data so the next user starts fresh
     logout();
     setMenuOpen(false);
+    // Bug #3: clear in-progress cart so next user doesn't inherit previous order
+    useCartStore.getState().clearCart();
   }, [logout, queryClient]);
 
   const visible = useMemo(() => {
@@ -1194,15 +1216,17 @@ function POSPage() {
   // the store only updates 300ms after the user stops typing.
   const [noteLocal, setNoteLocal] = useState(cart.cart.note);
   const noteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Bug #17: stable selector so handleNoteChange isn't recreated on every cart mutation
+  const stableSetNote = useCartStore(s => s.setNote);
   const handleNoteChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setNoteLocal(val);
     if (noteDebounceRef.current) clearTimeout(noteDebounceRef.current);
     noteDebounceRef.current = setTimeout(() => {
-      cart.setNote(val);
+      stableSetNote(val);
       noteDebounceRef.current = null; // reset so guard re-arms for next sync
     }, 300);
-  }, [cart]);
+  }, [stableSetNote]);
 
   // FIX A: Keep noteLocal in sync when cart.cart.note changes externally.
   // This happens on two code paths:
@@ -2334,12 +2358,14 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
             </div>
           </div>
         </Modal>
+        {/* Bug #13b: backend rejects non-admins with 403 — require admin PIN upfront */}
         <AnyUserPinModal
           open={showAnyPin}
           onClose={() => { setShowAnyPin(false); setPendingAction(null); }}
           onSuccess={executeAction}
-          title="🔒 Open Shift"
-          description="Enter your PIN to open the shift."
+          title="🔒 Open Shift (Admin Required)"
+          description="Only admins can open a shift. Enter an admin PIN to continue."
+          required_role="admin"
         />
       </>
     );
@@ -2525,11 +2551,10 @@ function PartialActionModal({
               style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
               {actionLabel} Entire Sale
             </button>
-            <button onClick={() => setMode('items')}
-              role="tab" aria-selected={mode === 'items'}
-              className={clsx('flex-1 py-2 rounded-xl text-sm font-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
-                mode === 'items' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              )}
+            {/* Bug #1: backend always voids/refunds entire sale — partial not supported yet */}
+            <button disabled title="Partial void/refund not yet supported"
+              role="tab" aria-selected={false}
+              className="flex-1 py-2 rounded-xl text-sm font-700 opacity-40 cursor-not-allowed text-gray-400"
               style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
               {actionLabel} Selected Items
             </button>
@@ -3532,8 +3557,15 @@ function AdminMenuPage() {
 
   const [deleteItemConfirm, setDeleteItemConfirm] = useState<string | null>(null);
 
-  const moveUp = useCallback((catId: string) => reorderCategory.mutate({ id: catId, direction: 'up' }), [reorderCategory]);
-  const moveDown = useCallback((catId: string) => reorderCategory.mutate({ id: catId, direction: 'down' }), [reorderCategory]);
+  // Bug #12: mutateAsync + catch so "Cannot move further" toasts instead of silently failing
+  const moveUp = useCallback(async (catId: string) => {
+    try { await reorderCategory.mutateAsync({ id: catId, direction: 'up' }); }
+    catch (e: unknown) { toast(e instanceof Error ? e.message : 'Cannot move category', 'error'); }
+  }, [reorderCategory]);
+  const moveDown = useCallback(async (catId: string) => {
+    try { await reorderCategory.mutateAsync({ id: catId, direction: 'down' }); }
+    catch (e: unknown) { toast(e instanceof Error ? e.message : 'Cannot move category', 'error'); }
+  }, [reorderCategory]);
 
   const [deleteCatConfirm, setDeleteCatConfirm] = useState<string | null>(null);
 
