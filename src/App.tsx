@@ -361,20 +361,27 @@ function formatAuditEntry(log: AuditLog): { title: string; detail: string | null
 const PIN_MAX_ATTEMPTS = 5;
 const PIN_LOCKOUT_MS = 60_000;
 
-const pinLockoutState = {
-  attempts: 0,
-  lockedUntil: 0,
-  increment() {
-    this.attempts += 1;
-    if (this.attempts >= PIN_MAX_ATTEMPTS) {
-      this.lockedUntil = Date.now() + PIN_LOCKOUT_MS;
-      this.attempts = 0;
-    }
-  },
-  reset() { this.attempts = 0; this.lockedUntil = 0; },
-  isLocked() { return Date.now() < this.lockedUntil; },
-  secondsLeft() { return Math.ceil(Math.max(0, this.lockedUntil - Date.now()) / 1000); },
-};
+// FIX [A]: factory so login and in-app PIN have independent counters.
+// Previously 5 failed login attempts would also lock the admin PIN modal
+// for 60 s, blocking shift ops, voids, and refunds mid-shift.
+function createPinLockout() {
+  return {
+    attempts: 0,
+    lockedUntil: 0,
+    increment() {
+      this.attempts += 1;
+      if (this.attempts >= PIN_MAX_ATTEMPTS) {
+        this.lockedUntil = Date.now() + PIN_LOCKOUT_MS;
+        this.attempts = 0;
+      }
+    },
+    reset() { this.attempts = 0; this.lockedUntil = 0; },
+    isLocked() { return Date.now() < this.lockedUntil; },
+    secondsLeft() { return Math.ceil(Math.max(0, this.lockedUntil - Date.now()) / 1000); },
+  };
+}
+const pinLockoutState = createPinLockout(); // LoginPage
+const inAppLockout    = createPinLockout(); // PinModal + AnyUserPinModal
 
 // ─── Any-User PIN Modal ────────────────────────────────────────
 function AnyUserPinModal({
@@ -399,7 +406,7 @@ function AnyUserPinModal({
   useEffect(() => {
     if (!locked) return;
     const iv = setInterval(() => {
-      const secs = pinLockoutState.secondsLeft();
+      const secs = inAppLockout.secondsLeft();
       if (secs <= 0) { setLocked(false); setLockSecs(0); clearInterval(iv); }
       else setLockSecs(secs);
     }, 500);
@@ -407,20 +414,20 @@ function AnyUserPinModal({
   }, [locked]);
 
   const doSubmit = useCallback(async (pinValue: string, user: User) => {
-    if (pinLockoutState.isLocked()) {
-      setLocked(true); setLockSecs(pinLockoutState.secondsLeft()); setPin(''); return;
+    if (inAppLockout.isLocked()) {
+      setLocked(true); setLockSecs(inAppLockout.secondsLeft()); setPin(''); return;
     }
     try {
       await verifyPin.mutateAsync({ user_id: user.id, pin: pinValue });
-      pinLockoutState.reset();
+      inAppLockout.reset();
       onSuccess({ user_id: user.id, user_name: user.name, role: user.role });
     } catch {
-      pinLockoutState.increment();
-      if (pinLockoutState.isLocked()) {
-        setLocked(true); setLockSecs(pinLockoutState.secondsLeft());
-        setError(`Too many attempts. Locked for ${pinLockoutState.secondsLeft()}s.`);
+      inAppLockout.increment();
+      if (inAppLockout.isLocked()) {
+        setLocked(true); setLockSecs(inAppLockout.secondsLeft());
+        setError(`Too many attempts. Locked for ${inAppLockout.secondsLeft()}s.`);
       } else {
-        setError(`Invalid PIN. ${PIN_MAX_ATTEMPTS - pinLockoutState.attempts} attempt(s) left.`);
+        setError(`Invalid PIN. ${PIN_MAX_ATTEMPTS - inAppLockout.attempts} attempt(s) left.`);
       }
       setPin('');
     }
@@ -546,7 +553,7 @@ function PinModal() {
   useEffect(() => {
     if (!locked) return;
     const iv = setInterval(() => {
-      const secs = pinLockoutState.secondsLeft();
+      const secs = inAppLockout.secondsLeft();
       if (secs <= 0) { setLocked(false); setLockSecs(0); clearInterval(iv); }
       else setLockSecs(secs);
     }, 500);
@@ -557,20 +564,20 @@ function PinModal() {
   // `press` in its deps array — required by TypeScript (TS2448/TS2454).
   const doSubmit = useCallback(async (pinValue: string) => {
     if (!user) return;
-    if (pinLockoutState.isLocked()) {
-      setLocked(true); setLockSecs(pinLockoutState.secondsLeft()); setPin(''); return;
+    if (inAppLockout.isLocked()) {
+      setLocked(true); setLockSecs(inAppLockout.secondsLeft()); setPin(''); return;
     }
     try {
       await verifyPin.mutateAsync({ user_id: user.id, pin: pinValue, required_role: pinModal.required_role });
-      pinLockoutState.reset();
+      inAppLockout.reset();
       resolvePinModal({ verified: true, user_id: user.id, user_name: user.name, role: user.role });
     } catch {
-      pinLockoutState.increment();
-      if (pinLockoutState.isLocked()) {
-        setLocked(true); setLockSecs(pinLockoutState.secondsLeft());
-        setError(`Too many attempts. Locked for ${pinLockoutState.secondsLeft()}s.`);
+      inAppLockout.increment();
+      if (inAppLockout.isLocked()) {
+        setLocked(true); setLockSecs(inAppLockout.secondsLeft());
+        setError(`Too many attempts. Locked for ${inAppLockout.secondsLeft()}s.`);
       } else {
-        setError(`Invalid PIN. ${PIN_MAX_ATTEMPTS - pinLockoutState.attempts} attempt(s) left.`);
+        setError(`Invalid PIN. ${PIN_MAX_ATTEMPTS - inAppLockout.attempts} attempt(s) left.`);
       }
       setPin('');
     }
@@ -2152,10 +2159,15 @@ function HeldOrdersModal({ onClose, onRestore }: { onClose: () => void; onRestor
   const handleHold = async () => {
     if (cartIsEmpty) return;
     const cartSnapshot = useCartStore.getState().cart;
-    await createHeld.mutateAsync({ data: cartSnapshot, label: label || undefined });
-    clearCart();
-    toast('Order parked');
-    onClose();
+    // FIX [B]: catch API errors so the user gets feedback instead of silence
+    try {
+      await createHeld.mutateAsync({ data: cartSnapshot, label: label || undefined });
+      clearCart();
+      toast('Order parked');
+      onClose();
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Failed to park order', 'error');
+    }
   };
 
   const handleRestore = useCallback((order: HeldOrder) => {
@@ -2280,19 +2292,24 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
 
   const executeAction = useCallback(async (actioner: { user_id: string; user_name: string; role: string }) => {
     setShowAnyPin(false);
-    if (pendingAction === 'open') {
-      await openShift.mutateAsync({ starting_float: parseFloat(startFloat) || 0 });
-      toast('Shift opened');
-      onCloseRef.current();
-    } else if (pendingAction === 'close' && shift) {
-      await closeShift.mutateAsync({ id: shift.id, closing_cash: parseFloat(closingCash) || 0, notes: closeNotes });
-      toast('Shift closed');
-      onCloseRef.current();
-    } else if (pendingAction === 'drop' && shift && dropReason) {
-      await cashDrop.mutateAsync({ shift_id: shift.id, amount: parseFloat(dropAmount) || 0, reason: dropReason });
-      toast('Cash drop recorded');
-      setDropAmount(''); setDropReason('');
-      onCloseRef.current();
+    // FIX [C]: wrap in try/catch so shift-op failures surface as toasts
+    try {
+      if (pendingAction === 'open') {
+        await openShift.mutateAsync({ starting_float: parseFloat(startFloat) || 0 });
+        toast('Shift opened');
+        onCloseRef.current();
+      } else if (pendingAction === 'close' && shift) {
+        await closeShift.mutateAsync({ id: shift.id, closing_cash: parseFloat(closingCash) || 0, notes: closeNotes });
+        toast('Shift closed');
+        onCloseRef.current();
+      } else if (pendingAction === 'drop' && shift && dropReason) {
+        await cashDrop.mutateAsync({ shift_id: shift.id, amount: parseFloat(dropAmount) || 0, reason: dropReason });
+        toast('Cash drop recorded');
+        setDropAmount(''); setDropReason('');
+        onCloseRef.current();
+      }
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Action failed', 'error');
     }
     setPendingAction(null);
   }, [pendingAction, openShift, closeShift, cashDrop, shift, startFloat, closingCash, closeNotes, dropAmount, dropReason]);
@@ -2756,12 +2773,17 @@ function SalesPage() {
   const doReprint = useCallback(async (actioner: { user_id: string; user_name: string; role: string }) => {
     if (!saleDetail) return;
     setShowAnyPinForReprint(false);
-    await reprint.mutateAsync({ id: saleDetail.id, actioned_by_user_id: actioner.user_id, actioned_by_name: actioner.user_name });
-    toast('Reprint recorded');
-    if (settings) {
-      await printReceipt(saleDetail, settings);
-    } else {
-      toast('Printer settings not loaded yet — please try again in a moment.', 'error');
+    // FIX [E]: catch reprint API errors (e.g. shift already closed, receipt not found)
+    try {
+      await reprint.mutateAsync({ id: saleDetail.id, actioned_by_user_id: actioner.user_id, actioned_by_name: actioner.user_name });
+      toast('Reprint recorded');
+      if (settings) {
+        await printReceipt(saleDetail, settings);
+      } else {
+        toast('Printer settings not loaded yet — please try again in a moment.', 'error');
+      }
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Reprint failed', 'error');
     }
   }, [saleDetail, reprint, settings]);
 
@@ -3171,9 +3193,14 @@ function AdminSettingsPage() {
   const set = useCallback((key: string, val: string) => { setForm(p => ({ ...p, [key]: val })); setDirty(true); }, []);
 
   const handleSave = useCallback(async () => {
-    await updateSettings.mutateAsync(form);
-    setDirty(false);
-    toast('Settings saved');
+    // FIX [D]: catch API errors; without this the Promise rejects silently
+    try {
+      await updateSettings.mutateAsync(form);
+      setDirty(false);
+      toast('Settings saved');
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Failed to save settings', 'error');
+    }
   }, [updateSettings, form]);
 
   useEffect(() => {
@@ -3432,26 +3459,41 @@ function AdminMenuPage() {
 
   const handleAddCategory = useCallback(async () => {
     if (!newCatName.trim()) return;
-    await createCategory.mutateAsync({ name: newCatName, sort_order: categories.length });
-    setNewCatName('');
-    toast('Category added');
+    // FIX [F]: surface API errors (e.g. duplicate name) instead of swallowing them
+    try {
+      await createCategory.mutateAsync({ name: newCatName, sort_order: categories.length });
+      setNewCatName('');
+      toast('Category added');
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Failed to add category', 'error');
+    }
   }, [createCategory, newCatName, categories.length]);
 
   const handleAddItem = useCallback(async () => {
     const sizes = newItem.sizes.filter(s => s.name && s.price).map(s => ({ name: s.name, price: parseFloat(s.price) }));
     if (!newItem.name || !sizes.length) return;
-    await createItem.mutateAsync({ name: newItem.name, category_id: newItem.category_id || undefined, sizes });
-    setNewItem({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }] });
-    setShowAddItem(false);
-    toast('Item added');
+    // FIX [G]: catch API errors so the form stays open and user sees the problem
+    try {
+      await createItem.mutateAsync({ name: newItem.name, category_id: newItem.category_id || undefined, sizes });
+      setNewItem({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }] });
+      setShowAddItem(false);
+      toast('Item added');
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Failed to add item', 'error');
+    }
   }, [createItem, newItem]);
 
   const handleAddAddon = useCallback(async () => {
     if (!newAddon.name || !newAddon.price) return;
-    await createAddon.mutateAsync({ name: newAddon.name, price: parseFloat(newAddon.price) });
-    setNewAddon({ name: '', price: '' });
-    setShowAddAddon(false);
-    toast('Add-on added');
+    // FIX [H]: catch API errors (e.g. duplicate add-on name)
+    try {
+      await createAddon.mutateAsync({ name: newAddon.name, price: parseFloat(newAddon.price) });
+      setNewAddon({ name: '', price: '' });
+      setShowAddAddon(false);
+      toast('Add-on added');
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Failed to add add-on', 'error');
+    }
   }, [createAddon, newAddon]);
 
   const [editForm, setEditForm] = useState<{
@@ -3468,9 +3510,14 @@ function AdminMenuPage() {
     if (!editItem || !editForm) return;
     const sizes = editForm.sizes.filter(s => s.name && s.price).map(s => ({ ...(s.id ? { id: s.id } : {}), name: s.name, price: parseFloat(s.price) }));
     if (!editForm.name || !sizes.length) return;
-    await updateItem.mutateAsync({ id: editItem.id, name: editForm.name, category_id: editForm.category_id || undefined, sizes });
-    setEditItem(null); setEditForm(null);
-    toast('Item updated');
+    // FIX [I]: keep form open and show error instead of silently failing
+    try {
+      await updateItem.mutateAsync({ id: editItem.id, name: editForm.name, category_id: editForm.category_id || undefined, sizes });
+      setEditItem(null); setEditForm(null);
+      toast('Item updated');
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Failed to update item', 'error');
+    }
   }, [updateItem, editItem, editForm]);
 
   const [deleteItemConfirm, setDeleteItemConfirm] = useState<string | null>(null);
@@ -4027,8 +4074,11 @@ export default function App() {
       fetch(`${(import.meta.env.VITE_API_URL ?? '').replace(/\/api$/, '')}/api/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-        .then(res => { if (!res.ok) logout() })
-        .catch(() => logout())
+        // FIX [J]: only force-logout on explicit auth rejection (401/403).
+        // Network hiccups (LAN drop, Android radio sleep) previously caused
+        // an unintended logout mid-shift, losing the active cart state.
+        .then(res => { if (res.status === 401 || res.status === 403) logout() })
+        .catch(() => { /* transient network error — stay logged in */ })
     }
     autoReconnectPrinter()
   // eslint-disable-next-line react-hooks/exhaustive-deps
