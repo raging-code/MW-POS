@@ -11,7 +11,6 @@ import {
   ArrowLeft, Save, ChevronRight, Coffee, Tag, Maximize, Minimize,
   ArrowUp, ArrowDown, FileText,
 } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore, useCartStore, useUIStore, useCartTotal, useCartItemCount, useCartSubtotal, useCartDiscountTotal, useCartIsEmpty} from './store';
 import type {
   User, Category, MenuItem, Addon, CartItem, SaleDetail,
@@ -909,7 +908,6 @@ function LoginPage() {
 function Header() {
   const { page, navigate } = useUIStore();
   const { user, logout } = useAuthStore();
-  const queryClient = useQueryClient();
   const { data: shift } = useCurrentShift();
   const [menuOpen, setMenuOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(!!document.fullscreenElement);
@@ -926,10 +924,9 @@ function Header() {
   }, []);
 
   const handleLogout = useCallback(() => {
-    queryClient.clear();   // flush cached data so the next user starts fresh
     logout();
     setMenuOpen(false);
-  }, [logout, queryClient]);
+  }, [logout]);
 
   const visible = useMemo(() => {
     const all: { label: string; page: Page; icon: React.ReactNode; adminOnly?: boolean }[] = [

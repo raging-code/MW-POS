@@ -789,7 +789,6 @@ app.post('/api/shifts', async (c) => {
 
 app.put('/api/shifts/:id/close', async (c) => {
   const actor = c.get('user')
-  if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const id = c.req.param('id')
   const body = await c.req.json<{ closing_cash: number; notes?: string }>()
@@ -1303,6 +1302,8 @@ app.get('/api/reports/sales-detailed', async (c) => {
   const date_to = c.req.query('date_to')
   const year = c.req.query('year')
   const month = c.req.query('month')
+
+  console.log('sales-detailed params:', { period, date, date_from, date_to, year, month })
 
   let startDate: string, endDate: string
 
