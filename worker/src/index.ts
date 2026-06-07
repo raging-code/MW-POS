@@ -359,6 +359,11 @@ app.use('/api/*', async (c, next) => {
   const db = drizzle(c.env.DB)
   c.set('db', db)
 
+  // Housekeeping: silently purge expired sessions on every request.
+  // Expired rows are harmless but accumulate forever without this.
+  // fire-and-forget — don't await so it never delays the response.
+  db.delete(sessions).where(lte(sessions.expires_at, nowISO())).run().catch(() => {})
+
   // Public routes skip auth
   const publicPaths = ['/api/auth/login', '/api/auth/users', '/api/init']
   if (publicPaths.some(p => c.req.path.startsWith(p))) {
