@@ -4074,6 +4074,7 @@ class ErrorBoundary extends React.Component<
 
 export default function App() {
   const { user, token, logout } = useAuthStore()
+  const queryClient = useQueryClient()
 
   useEffect(() => {
     if (user && token) {

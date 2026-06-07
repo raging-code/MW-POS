@@ -6,7 +6,6 @@ export type Page =
   | 'admin_dashboard'
   | 'admin_menu'
   | 'admin_employees'
-  | 'admin_inventory'
   | 'admin_settings'
   | 'admin_audit';
 
