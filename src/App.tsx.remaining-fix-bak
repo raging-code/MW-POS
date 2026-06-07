@@ -4083,7 +4083,7 @@ export default function App() {
         // FIX [J]: only force-logout on explicit auth rejection (401/403).
         // Network hiccups (LAN drop, Android radio sleep) previously caused
         // an unintended logout mid-shift, losing the active cart state.
-        .then(res => { if (res.status === 401 || res.status === 403) { queryClient.clear(); logout() } })
+        .then(res => { if (res.status === 401 || res.status === 403) logout() })
         .catch(() => { /* transient network error — stay logged in */ })
     }
     autoReconnectPrinter()
