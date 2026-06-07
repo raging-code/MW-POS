@@ -177,7 +177,8 @@ export function useUpdateMenuItem() {
   const api = useApi()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; name?: string; category_id?: string; is_active?: boolean; sizes?: { name: string; price: number }[] }) =>
+    // Bug #11 fix: category_id can be null to unassign a category from an item.
+    mutationFn: ({ id, ...body }: { id: string; name?: string; category_id?: string | null; is_active?: boolean; sizes?: { name: string; price: number }[] }) =>
       api.put(`/menu/items/${id}`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })

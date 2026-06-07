@@ -157,17 +157,33 @@ function dashes(n: number): string { return '-'.repeat(n); }
  * Returns an array of lines, each at most `width` chars long.
  */
 function wordWrap(s: string, width: number): string[] {
+  // Bug #5 fix: a single word longer than the column width (e.g. an item name with no
+  // spaces like "SpecialMangoFrappeWithExtra") was placed on one line, causing
+  // it to overflow the printable area on 57mm (32-col) paper and produce
+  // garbled output.  We now hard-break any word that exceeds the column width.
+  function splitLongWord(word: string): string[] {
+    const chunks: string[] = [];
+    for (let i = 0; i < word.length; i += width) {
+      chunks.push(word.slice(i, i + width));
+    }
+    return chunks;
+  }
+
   const words = s.split(' ');
   const lines: string[] = [];
   let current = '';
-  for (const word of words) {
-    if (!current) {
-      current = word;
-    } else if (current.length + 1 + word.length <= width) {
-      current += ' ' + word;
-    } else {
-      lines.push(current);
-      current = word;
+  for (const rawWord of words) {
+    // Expand any word that is itself too long before processing
+    const subWords = rawWord.length > width ? splitLongWord(rawWord) : [rawWord];
+    for (const word of subWords) {
+      if (!current) {
+        current = word;
+      } else if (current.length + 1 + word.length <= width) {
+        current += ' ' + word;
+      } else {
+        lines.push(current);
+        current = word;
+      }
     }
   }
   if (current) lines.push(current);

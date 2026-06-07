@@ -262,8 +262,18 @@ function addHours(h: number): string {
 // Without this, date-range queries miss the first 8 h of each day (00:00–07:59
 // Manila time) and may include the first 8 h of the following day.
 function manilaToUTC(dateStr: string, boundary: 'start' | 'end'): string {
+  // Bug #10 fix: validate the date string before constructing a Date.
+  // A malformed value (e.g. "not-a-date") makes toISOString() throw
+  // "Invalid time value" which previously crashed the Worker unhandled.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    throw new Error(`Invalid date format: "${dateStr}". Expected YYYY-MM-DD.`)
+  }
   const time = boundary === 'start' ? 'T00:00:00.000+08:00' : 'T23:59:59.999+08:00'
-  return new Date(dateStr + time).toISOString()
+  const d = new Date(dateStr + time)
+  if (isNaN(d.getTime())) {
+    throw new Error(`Invalid date value: "${dateStr}".`)
+  }
+  return d.toISOString()
 }
 
 function jsonOk(data: unknown, status = 200): Response {
@@ -595,7 +605,14 @@ app.put('/api/menu/categories/:id', async (c) => {
   const db = c.get('db')
   const id = c.req.param('id')
   const body = await c.req.json<{ name?: string; sort_order?: number }>()
-  await db.update(categories).set(body).where(eq(categories.id, id))
+  const old = await db.select().from(categories).where(eq(categories.id, id)).get()
+  if (!old) return jsonErr('Category not found', 404)
+  // Bug #8 fix: whitelist fields instead of spreading raw body + add audit log
+  const safeFields: Partial<typeof categories.$inferInsert> = {}
+  if (body.name       !== undefined) safeFields.name       = body.name
+  if (body.sort_order !== undefined) safeFields.sort_order = body.sort_order
+  await db.update(categories).set(safeFields).where(eq(categories.id, id))
+  await createAuditLog(db, actor.id, 'rename_category', 'category', id, old, safeFields, null)
   return jsonOk({ ok: true })
 })
 
@@ -679,13 +696,19 @@ app.put('/api/menu/items/:id', async (c) => {
   const db = c.get('db')
   const id = c.req.param('id')
   const body = await c.req.json<{
-    name?: string; category_id?: string; is_active?: boolean;
+    name?: string; category_id?: string | null; is_active?: boolean;
     sizes?: { id?: string; name: string; price: number }[];
     addon_ids?: string[];
   }>()
   const old = await db.select().from(menuItems).where(eq(menuItems.id, id)).get()
   if (!old) return jsonErr('Item not found', 404)
-  await db.update(menuItems).set({ name: body.name, category_id: body.category_id, is_active: body.is_active }).where(eq(menuItems.id, id))
+  // Bug #11 fix: when category_id is explicitly null, emit SET category_id = NULL
+  // so the item is moved to "uncategorized". If it's undefined, omit from SET.
+  const itemUpdateFields: Partial<typeof menuItems.$inferInsert> = {}
+  if (body.name      !== undefined) itemUpdateFields.name      = body.name
+  if (body.is_active !== undefined) itemUpdateFields.is_active = body.is_active
+  if (body.category_id !== undefined) itemUpdateFields.category_id = body.category_id // null is valid here
+  await db.update(menuItems).set(itemUpdateFields).where(eq(menuItems.id, id))
   if (body.sizes) {
     await db.delete(itemSizes).where(eq(itemSizes.item_id, id))
     await db.insert(itemSizes).values(body.sizes.map(s => ({ id: s.id ?? uid(), item_id: id, name: s.name, price: s.price })))
@@ -734,6 +757,8 @@ app.post('/api/menu/addons', async (c) => {
   const body = await c.req.json<{ name: string; price: number }>()
   const id = uid()
   await db.insert(addons).values({ id, name: body.name, price: body.price })
+  // Bug #7 fix: missing audit log for addon creation
+  await createAuditLog(db, actor.id, 'create_addon', 'addon', id, null, { name: body.name, price: body.price }, null)
   return jsonOk({ id })
 })
 
@@ -743,7 +768,15 @@ app.put('/api/menu/addons/:id', async (c) => {
   const db = c.get('db')
   const id = c.req.param('id')
   const body = await c.req.json<{ name?: string; price?: number; is_available?: boolean }>()
-  await db.update(addons).set(body).where(eq(addons.id, id))
+  // Bug #7 fix: whitelist fields (mirrors category/item pattern) + add audit log
+  const old = await db.select().from(addons).where(eq(addons.id, id)).get()
+  if (!old) return jsonErr('Addon not found', 404)
+  const safeFields: Partial<typeof addons.$inferInsert> = {}
+  if (body.name         !== undefined) safeFields.name         = body.name
+  if (body.price        !== undefined) safeFields.price        = body.price
+  if (body.is_available !== undefined) safeFields.is_available = body.is_available
+  await db.update(addons).set(safeFields).where(eq(addons.id, id))
+  await createAuditLog(db, actor.id, 'edit_addon', 'addon', id, old, safeFields, null)
   return jsonOk({ ok: true })
 })
 
@@ -752,7 +785,14 @@ app.delete('/api/menu/addons/:id', async (c) => {
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const id = c.req.param('id')
+  const existing = await db.select({ name: addons.name }).from(addons).where(eq(addons.id, id)).get()
+  if (!existing) return jsonErr('Addon not found', 404)
+  // Bug #9 fix: remove dangling item_addons rows before deleting the addon.
+  // Without this, menu items silently lose their addon associations.
+  await db.delete(itemAddons).where(eq(itemAddons.addon_id, id))
   await db.delete(addons).where(eq(addons.id, id))
+  // Bug #7 fix: missing audit log for addon deletion
+  await createAuditLog(db, actor.id, 'delete_addon', 'addon', id, { name: existing.name }, null, null)
   return jsonOk({ ok: true })
 })
 
@@ -1042,8 +1082,12 @@ app.get('/api/sales', async (c) => {
       : baseSelect.where(not(eq(sales.status, 'soft_deleted')))
   ).orderBy(desc(sales.created_at)).$dynamic()
 
-  if (date_from) query = query.where(gte(sales.created_at, manilaToUTC(date_from, 'start')))
-  if (date_to)   query = query.where(lte(sales.created_at, manilaToUTC(date_to,   'end')))
+  try {
+    if (date_from) query = query.where(gte(sales.created_at, manilaToUTC(date_from, 'start')))
+    if (date_to)   query = query.where(lte(sales.created_at, manilaToUTC(date_to,   'end')))
+  } catch (err) {
+    return jsonErr(err instanceof Error ? err.message : 'Invalid date parameter', 400)
+  }
   // FIX 2: apply order_type filter (was parsed but discarded)
   if (order_type) query = query.where(eq(sales.order_type, order_type as typeof sales.order_type._.data))
   if (receipt)   query = query.where(eq(sales.receipt_number, receipt))
@@ -1194,13 +1238,22 @@ app.post('/api/sales/:id/void', async (c) => {
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const id = c.req.param('id')
-  const body = await c.req.json<{ reason: string }>()
+  // Bug #2 fix: read actioned_by fields so the PIN-authorizer is recorded in
+  // the audit log instead of always recording the logged-in session user.
+  const body = await c.req.json<{ reason: string; actioned_by_user_id?: string; actioned_by_name?: string }>()
   if (!body.reason) return jsonErr('Reason required')
   const sale = await db.select().from(sales).where(eq(sales.id, id)).get()
   if (!sale) return jsonErr('Sale not found', 404)
   if (sale.status !== 'completed') return jsonErr('Only completed sales can be voided')
   await db.update(sales).set({ status: 'voided' }).where(eq(sales.id, id))
-  await createAuditLog(db, actor.id, 'void_sale', 'sale', id, { status: 'completed' }, { status: 'voided' }, body.reason)
+  // Use the PIN-authorizer's ID when provided, fall back to session user.
+  const auditUserId = body.actioned_by_user_id ?? actor.id
+  const newValue = {
+    status: 'voided',
+    actioned_by_user_id: body.actioned_by_user_id ?? null,
+    actioned_by_name: body.actioned_by_name ?? null,
+  }
+  await createAuditLog(db, auditUserId, 'void_sale', 'sale', id, { status: 'completed' }, newValue, body.reason)
   return jsonOk({ ok: true })
 })
 
@@ -1211,13 +1264,20 @@ app.post('/api/sales/:id/refund', async (c) => {
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const id = c.req.param('id')
-  const body = await c.req.json<{ reason: string }>()
+  // Bug #2 fix: read actioned_by fields so the PIN-authorizer is recorded.
+  const body = await c.req.json<{ reason: string; actioned_by_user_id?: string; actioned_by_name?: string }>()
   if (!body.reason) return jsonErr('Reason required')
   const sale = await db.select().from(sales).where(eq(sales.id, id)).get()
   if (!sale) return jsonErr('Sale not found', 404)
   if (!['completed'].includes(sale.status)) return jsonErr('Sale cannot be refunded in current status')
   await db.update(sales).set({ status: 'refunded' }).where(eq(sales.id, id))
-  await createAuditLog(db, actor.id, 'refund_sale', 'sale', id, { status: sale.status }, { status: 'refunded' }, body.reason)
+  const auditUserId = body.actioned_by_user_id ?? actor.id
+  const newValue = {
+    status: 'refunded',
+    actioned_by_user_id: body.actioned_by_user_id ?? null,
+    actioned_by_name: body.actioned_by_name ?? null,
+  }
+  await createAuditLog(db, auditUserId, 'refund_sale', 'sale', id, { status: sale.status }, newValue, body.reason)
   return jsonOk({ ok: true })
 })
 
@@ -1241,13 +1301,19 @@ app.post('/api/sales/:id/reprint', async (c) => {
   const actor = c.get('user')
   const db = c.get('db')
   const id = c.req.param('id')
+  // Bug #2 fix: read actioned_by fields so the PIN-authorizer is recorded.
+  const body = await c.req.json<{ actioned_by_user_id?: string; actioned_by_name?: string }>().catch(() => ({} as { actioned_by_user_id?: string; actioned_by_name?: string }))
   const sale = await db.select({ is_reprinted: sales.is_reprinted }).from(sales).where(eq(sales.id, id)).get()
   if (!sale) return jsonErr('Sale not found', 404)
   // FIXED: removed hard block — each reprint is now only logged (not blocked).
-  // is_reprinted remains true after the first reprint as a "has been reprinted"
-  // indicator; admins can reprint as many times as needed (printer jams, etc.).
   await db.update(sales).set({ is_reprinted: true }).where(eq(sales.id, id))
-  await createAuditLog(db, actor.id, 'reprint_receipt', 'sale', id, null, { reprint_count: 'incremented' }, null)
+  const auditUserId = body.actioned_by_user_id ?? actor.id
+  const newValue = {
+    reprint_count: 'incremented',
+    actioned_by_user_id: body.actioned_by_user_id ?? null,
+    actioned_by_name: body.actioned_by_name ?? null,
+  }
+  await createAuditLog(db, auditUserId, 'reprint_receipt', 'sale', id, null, newValue, null)
   return jsonOk({ ok: true })
 })
 
@@ -1270,8 +1336,12 @@ app.get('/api/reports/sales', async (c) => {
     not(eq(sales.status, 'soft_deleted'))
   ).$dynamic()
 
-  if (date_from) salesQuery = salesQuery.where(gte(sales.created_at, manilaToUTC(date_from, 'start')))
-  if (date_to) salesQuery = salesQuery.where(lte(sales.created_at, manilaToUTC(date_to, 'end')))
+  try {
+    if (date_from) salesQuery = salesQuery.where(gte(sales.created_at, manilaToUTC(date_from, 'start')))
+    if (date_to) salesQuery = salesQuery.where(lte(sales.created_at, manilaToUTC(date_to, 'end')))
+  } catch (err) {
+    return jsonErr(err instanceof Error ? err.message : 'Invalid date parameter', 400)
+  }
 
   const salesList = await salesQuery
   const completedSales = salesList.filter(s => s.status === 'completed')
@@ -1484,8 +1554,12 @@ app.get('/api/audit-logs', async (c) => {
 
   if (entity_type) query = query.where(eq(auditLogs.entity_type, entity_type))
   if (entity_id) query = query.where(eq(auditLogs.entity_id, entity_id))
-  if (date_from) query = query.where(gte(auditLogs.created_at, manilaToUTC(date_from, 'start')))
-  if (date_to) query = query.where(lte(auditLogs.created_at, manilaToUTC(date_to, 'end')))
+  try {
+    if (date_from) query = query.where(gte(auditLogs.created_at, manilaToUTC(date_from, 'start')))
+    if (date_to) query = query.where(lte(auditLogs.created_at, manilaToUTC(date_to, 'end')))
+  } catch (err) {
+    return jsonErr(err instanceof Error ? err.message : 'Invalid date parameter', 400)
+  }
 
   const logs = await query.limit(500)
   return jsonOk(logs)

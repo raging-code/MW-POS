@@ -1864,7 +1864,8 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   const cartIdempotency  = useCartStore(s => s.cart.idempotency_key);
   const discountTotal    = useCartDiscountTotal();
   const cartSubtotal     = useCartSubtotal();
-  const cartClearCart    = useCartStore(s => s.clearCart);
+  // Bug #15 fix: removed unused cartClearCart selector (was subscribing to
+  // the store for no reason; the actual clear happens via the onSuccess prop).
   const checkout         = useCheckout();
   const { data: settings } = useSettings();
   const total            = useCartTotal();
@@ -3518,7 +3519,10 @@ function AdminMenuPage() {
     if (!editForm.name || !sizes.length) return;
     // FIX [I]: keep form open and show error instead of silently failing
     try {
-      await updateItem.mutateAsync({ id: editItem.id, name: editForm.name, category_id: editForm.category_id || undefined, sizes });
+      // Bug #11 fix: send null instead of undefined when category_id is cleared.
+      // undefined is silently omitted by Drizzle's SET clause, leaving the item
+      // in its current category. null produces SET category_id = NULL as intended.
+      await updateItem.mutateAsync({ id: editItem.id, name: editForm.name, category_id: editForm.category_id || null, sizes });
       setEditItem(null); setEditForm(null);
       toast('Item updated');
     } catch (e: unknown) {
