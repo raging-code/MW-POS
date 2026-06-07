@@ -1,3 +1,13 @@
+# Release APK
+cd "project root"
+npm run build
+npx cap sync android
+cd "android"
+.\gradlew assembleRelease
+
+.\gradlew clean assembleRelease FOR CLEAN ASSEMBLE
+Find the APK here: android/app/build/outputs/apk/release/app-release.apk
+
 # React + TypeScript + Vite
 
 ## Deploy new index.ts (backend)
