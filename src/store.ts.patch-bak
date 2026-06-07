@@ -50,21 +50,9 @@ export const useAuthStore = create<AuthStore>()(
       user: null,
       token: null,
       login: (user, token) => set({ user, token }),
-      logout: () => {
-        set({ user: null, token: null });
-        // Fully remove the persisted key so stale data cannot
-        // survive a schema change on the next version bump.
-        try { localStorage.removeItem('pos-auth'); } catch { /* SSR / restricted env */ }
-      },
+      logout: () => set({ user: null, token: null }),
     }),
-    {
-      name: 'pos-auth',
-      version: 1,
-      migrate: (persisted) => {
-        // v0 → v1: no structural changes yet; just return as-is.
-        return persisted as AuthStore;
-      },
-    }
+    { name: 'pos-auth' }
   )
 );
 
