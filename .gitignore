@@ -21,3 +21,12 @@ node_modules
 *.sln
 *.sw?
 .env
+
+worker/.wrangler
+*.remaining-fix-bak
+*.final-bak
+*.minor-fix-bak
+*.patch-bak
+*.critical-fix-backup
+*.pinfix-backup
+patch-*.mjs
