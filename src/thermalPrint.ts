@@ -198,7 +198,7 @@ function delayMs(ms: number): Promise<void> {
 function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): Uint8Array {
   const cols = width === 80 ? 48 : 32;
  
-  const fmtMoney = (n: number) => `P${n.toFixed(2)}`;
+  const fmtMoney = (n: number) => `₱${n.toFixed(2)}`;
   const fmtDate  = (iso: string) => {
     try {
       const d = new Date(iso);
@@ -226,8 +226,7 @@ function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): 
 p(line(columns('Receipt:', sale.receipt_number,     cols)));
 p(line(columns('Cashier:', sale.cashier_name,        cols)));
 p(line(columns('Date:',    fmtDate(sale.created_at), cols)));
-// Fix 4: print the order type so kitchen/front-of-house know dine-in vs take-out
-p(line(columns('Order:',   sale.order_type === 'take_out' ? 'Take Out' : 'Dine In', cols)));
+// order_type line removed — not relevant for this business
 if (sale.note) p(line(columns('Note:', sale.note,    cols)));
 p(line(dashes(cols)));
  

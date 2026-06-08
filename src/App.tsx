@@ -29,7 +29,7 @@ import {
   useUsers, useCreateUser, useUpdateUser, useDeleteUser, useResetPin,
   useAuditLogs, useToggleAvailability, useCreateMenuItem,
   useUpdateMenuItem, useDeleteMenuItem, useCreateCategory,
-  useUpdateAddon, useCreateAddon, useEditSale,
+  useUpdateAddon, useDeleteAddon, useCreateAddon, useEditSale,
   useDeleteCategory, useReorderCategory, useDetailedSalesReport,
 } from './api';
 import {
@@ -76,7 +76,7 @@ function getCategoryColor(idx: number) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
-function fmt(amount: number) { return `P${amount.toFixed(2)}`; }
+function fmt(amount: number) { return `₱${amount.toFixed(2)}`; }
 function fmtDate(iso: string) {
   try { return format(parseISO(iso), 'MMM d, yyyy h:mm a'); } catch { return iso; }
 }
@@ -339,7 +339,7 @@ function formatAuditEntry(log: AuditLog): { title: string; detail: string | null
       notes: 'Notes', name: 'Name', role: 'Role', amount: 'Amount', reason: 'Reason',
       store_name: 'Store Name', store_address: 'Address', receipt_footer: 'Receipt Footer',
       sc_discount_pct: 'SC Discount %', pwd_discount_pct: 'PWD Discount %', total: 'Total',
-      status: 'Status', order_type: 'Order Type', qty: 'Qty', type: 'Type',
+      status: 'Status', qty: 'Qty', type: 'Type',
       actioned_by: 'Actioned By',
     };
     Object.entries(fieldMap).forEach(([key, readable]) => {
@@ -703,7 +703,7 @@ const SaleReceipt = memo(function SaleReceipt({ sale, settings }: { sale: SaleDe
       <div className="flex justify-between"><span>Receipt:</span><span>{sale.receipt_number}</span></div>
       <div className="flex justify-between"><span>Cashier:</span><span>{sale.cashier_name}</span></div>
       <div className="flex justify-between"><span>Date:</span><span>{fmtDate(sale.created_at)}</span></div>
-      <div className="flex justify-between"><span>Order:</span><span>{sale.order_type === 'take_out' ? 'Take Out' : 'Dine In'}</span></div>
+      {/* order_type removed — not relevant for this business */}
       {sale.note && <div className="flex justify-between"><span>Note:</span><span>{sale.note}</span></div>}
       <div className="border-t border-dashed border-gray-300 my-2" />
       {sale.items.map((item: SaleItemDetail, i: number) => (
@@ -1898,7 +1898,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   const [step, setStep] = useState<'payment' | 'success'>('payment');
   const [result, setResult] = useState<{ receipt_number: string; change: number } | null>(null);
   const [receiptData, setReceiptData] = useState<SaleDetail | null>(null);
-  const [orderType, setOrderType] = useState<'dine_in' | 'take_out'>('dine_in');
+  // order_type hardcoded to 'take_out' — dine-in/take-out not used in this business
 
   // Sync single-line cash payment amount when cart total changes (e.g. discount toggled
   // while checkout modal is open). Do not override if the user has already split payment.
@@ -1939,7 +1939,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
       const res = await checkout.mutateAsync({
         idempotency_key: cartIdempotency,
         shift_id: shift?.id,
-        order_type: orderType,
+        order_type: 'take_out', // dine-in/take-out removed — not relevant for this business
         note: cartNote || undefined,
         tendered_amount: hasCash && tendered ? tenderedNum : undefined,
         actioned_by_user_id: user.id,
@@ -1956,7 +1956,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
       setReceiptData({
         id: '', receipt_number: res.receipt_number,
         cashier_id: user.id, cashier_name: user.name,
-        order_type: orderType,
+        order_type: 'take_out', // removed — kept for type compat only
         status: 'completed', sale_type: 'normal',
         total: res.total, discount_total: discountTotal, subtotal: cartSubtotal,
         created_at: new Date().toISOString(), is_reprinted: false,
@@ -1978,7 +1978,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
       toast(e instanceof Error ? e.message : 'Checkout failed', 'error');
     }
   }, [user, cartItems, cartNote, cartIdempotency, discountTotal, cartSubtotal,
-      checkout, shift, orderType, hasCash, tendered, tenderedNum, payments]);
+      checkout, shift, hasCash, tendered, tenderedNum, payments]);
 
   return (
     <Modal
@@ -1994,19 +1994,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
               style={{ backgroundColor: '#D1FAE5' }}>
               <span className="text-4xl">✓</span>
             </div>
-            <div>
-              <p className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
-                style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Order Type</p>
-              <div className="inline-flex items-center justify-center px-4 py-2 rounded-xl text-sm font-700 border"
-                style={{
-                  fontWeight: 700,
-                  backgroundColor: 'var(--mango-yellow)',
-                  color: '#78350f',
-                  borderColor: 'var(--mango-yellow)',
-                }}>
-                {orderType === 'dine_in' ? '🍽 Dine In' : '🥡 Take Out'}
-              </div>
-            </div>
+            {/* order_type badge removed — not relevant for this business */}
             <p className="text-gray-500 text-sm font-medium mb-1">Receipt</p>
             <div className="text-gray-900 font-900 text-2xl" style={{ fontFamily: 'var(--font-display)', fontWeight: 900 }}>
               {result.receipt_number}
@@ -2052,24 +2040,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
             )}
           </div>
 
-          <div>
-            <p className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Order Type</p>
-            <div className="flex gap-2 mb-4">
-              {(['dine_in', 'take_out'] as const).map(type => (
-                <button key={type} type="button" onClick={() => setOrderType(type)}
-                  className="flex-1 py-2.5 rounded-xl text-sm font-700 border transition-colors"
-                  style={{
-                    fontWeight: 700,
-                    backgroundColor: orderType === type ? 'var(--mango-yellow)' : '#fff',
-                    color: orderType === type ? '#78350f' : '#52525B',
-                    borderColor: orderType === type ? 'var(--mango-yellow)' : '#E4E4E7',
-                  }}>
-                  {type === 'dine_in' ? '🍽 Dine In' : '🥡 Take Out'}
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* order_type selector removed — not relevant for this business */}
 
           <div>
             <div className="flex items-center justify-between mb-2.5">
@@ -3474,6 +3445,7 @@ function AdminMenuPage() {
   const toggleAvailability = useToggleAvailability();
   const createAddon = useCreateAddon();
   const updateAddon = useUpdateAddon();
+  const deleteAddon = useDeleteAddon();
   const deleteCategory = useDeleteCategory();
   const reorderCategory = useReorderCategory();
 
@@ -3693,17 +3665,34 @@ function AdminMenuPage() {
                       +{fmt(addon.price)}
                     </div>
                   </div>
-                  <button
-                    onClick={() => updateAddon.mutate({ id: addon.id, is_available: !addon.is_available })}
-                    aria-pressed={addon.is_available}
-                    className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
-                      addon.is_available
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                        : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
-                    )}
-                    style={{ fontWeight: 700 }}>
-                    {addon.is_available ? 'Available' : 'Unavailable'}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        // Bug D: mutateAsync so toggle errors show as toasts instead of silently failing
+                        try { await updateAddon.mutateAsync({ id: addon.id, is_available: !addon.is_available }); }
+                        catch (e: unknown) { toast(e instanceof Error ? e.message : 'Toggle failed', 'error'); }
+                      }}
+                      aria-pressed={addon.is_available}
+                      className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                        addon.is_available
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                          : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                      )}
+                      style={{ fontWeight: 700 }}>
+                      {addon.is_available ? 'Available' : 'Unavailable'}
+                    </button>
+                    {/* Bug C: delete addon button — was missing despite backend supporting it */}
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Delete add-on "${addon.name}"? This cannot be undone.`)) return;
+                        try { await deleteAddon.mutateAsync(addon.id); toast('Add-on deleted'); }
+                        catch (e: unknown) { toast(e instanceof Error ? e.message : 'Delete failed', 'error'); }
+                      }}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+                      title="Delete add-on">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
               ))}
               {!allAddons.length && <div className="col-span-2 text-center text-gray-400 py-10">No add-ons yet</div>}

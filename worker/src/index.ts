@@ -930,7 +930,7 @@ type CheckoutPayment = { method: 'cash' | 'gcash' | 'maya'; amount: number }
 type CheckoutBody = {
   idempotency_key: string
   shift_id?: string
-  order_type: 'dine_in' | 'take_out'
+  order_type?: 'dine_in' | 'take_out'  // optional — UI removed, always stored as 'take_out'
   note?: string
   tendered_amount?: number
   items: CheckoutItem[]
@@ -1041,7 +1041,7 @@ const change = hasCash && body.tendered_amount != null
   await db.batch([
     db.insert(sales).values({
       id: saleId, receipt_number: receiptNumber, shift_id: body.shift_id,
-      cashier_id: actor.id, order_type: body.order_type, status: 'completed',
+      cashier_id: actor.id, order_type: body.order_type ?? 'take_out', status: 'completed',
       sale_type: 'normal', note: body.note, subtotal,
       discount_total, total, tendered_amount: body.tendered_amount,
       change_amount: change, idempotency_key: body.idempotency_key,
@@ -1113,7 +1113,7 @@ app.post('/api/sales/missed', async (c) => {
   const actor = c.get('user')
   const db = c.get('db')
   const body = await c.req.json<{
-    order_type: 'dine_in' | 'take_out'
+    order_type?: 'dine_in' | 'take_out' // optional — always stored as 'take_out'
     note: string; reason: string
     total: number; items: CheckoutItem[]
     idempotency_key: string
@@ -1128,7 +1128,7 @@ app.post('/api/sales/missed', async (c) => {
 
   await db.insert(sales).values({
     id: saleId, receipt_number: receiptNumber,
-    cashier_id: actor.id, order_type: body.order_type,
+    cashier_id: actor.id, order_type: body.order_type ?? 'take_out', // removed from UI
     status: 'completed', sale_type: 'missed',
     note: body.note ?? body.reason, subtotal: body.total,
     discount_total: 0, total: body.total,

@@ -222,6 +222,15 @@ export function useUpdateAddon() {
   })
 }
 
+export function useDeleteAddon() {
+  const api = useApi()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/menu/addons/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
+  })
+}
+
 // ─── Shifts ───────────────────────────────────────────────────
 export function useCurrentShift() {
   const api = useApi()
