@@ -33,6 +33,7 @@ export interface Addon {
   name: string;
   price: number;
   is_available: boolean;
+  category_id: string | null;
 }
 
 export interface MenuItem {
@@ -40,7 +41,7 @@ export interface MenuItem {
   name: string;
   category_id: string;
   sizes: ItemSize[];
-  addons: Addon[];          // still returned by API but not used in creation/editing
+  addons: Addon[];          // addon_ids in creation/editing; full objects on read
   is_active: boolean;
   is_available: boolean;
 }
@@ -50,6 +51,7 @@ export interface Category {
   name: string;
   sort_order: number;
   items: MenuItem[];
+  addons: Addon[];
 }
 
 // ─── Cart ─────────────────────────────────────────────────────
