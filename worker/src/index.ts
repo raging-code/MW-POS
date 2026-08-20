@@ -89,6 +89,13 @@ const itemAddons = sqliteTable('item_addons', {
   addon_id: text('addon_id').notNull().references(() => addons.id),
 }, (t) => ({ pk: primaryKey({ columns: [t.item_id, t.addon_id] }) }))
 
+// NEW: join table letting a single add-on belong to MANY categories.
+// Supersedes the scalar addons.category_id column (kept for backward compat).
+const addonCategories = sqliteTable('addon_categories', {
+  addon_id:    text('addon_id').notNull().references(() => addons.id),
+  category_id: text('category_id').notNull().references(() => categories.id),
+}, (t) => ({ pk: primaryKey({ columns: [t.addon_id, t.category_id] }) }))
+
 const shifts = sqliteTable('shifts', {
   id:             text('id').primaryKey(),
   cashier_id:     text('cashier_id').notNull().references(() => users.id),
@@ -572,11 +579,20 @@ app.get('/api/menu', async (c) => {
   const sizes = await db.select().from(itemSizes)
   const addonsAll = await db.select().from(addons)
   const itemAddonsAll = await db.select().from(itemAddons)
+  // NEW: multi-category membership rows for add-ons
+  const addonCategoriesAll = await db.select().from(addonCategories)
+
+  // Attach the full list of category_ids each add-on belongs to
+  const addonsWithCategories = addonsAll.map(a => ({
+    ...a,
+    category_ids: addonCategoriesAll.filter(ac => ac.addon_id === a.id).map(ac => ac.category_id),
+  }))
 
   const menu = cats.map(cat => ({
     ...cat,
-    // NEW: this category's own add-on set (category-scoped, not global)
-    addons: addonsAll.filter(a => a.category_id === cat.id),
+    // CHANGED: an add-on now shows up under EVERY category it's been assigned to,
+    // not just a single one.
+    addons: addonsWithCategories.filter(a => a.category_ids.includes(cat.id)),
     items: items
       .filter(i => i.category_id === cat.id)
       .map(item => ({
@@ -584,11 +600,11 @@ app.get('/api/menu', async (c) => {
         sizes: sizes.filter(s => s.item_id === item.id),
         addons: itemAddonsAll
           .filter(ia => ia.item_id === item.id)
-          .map(ia => addonsAll.find(a => a.id === ia.addon_id))
+          .map(ia => addonsWithCategories.find(a => a.id === ia.addon_id))
           .filter(Boolean),
       })),
   }))
-  return jsonOk({ categories: menu, addons: addonsAll })
+  return jsonOk({ categories: menu, addons: addonsWithCategories })
 })
 
 app.post('/api/menu/categories', async (c) => {
@@ -604,7 +620,10 @@ app.post('/api/menu/categories', async (c) => {
   // NEW: create this category's own add-on set in the same request
   const validAddons = (body.addons ?? []).filter(a => a.name && typeof a.price === 'number' && !isNaN(a.price))
   if (validAddons.length) {
-    await db.insert(addons).values(validAddons.map(a => ({ id: uid(), name: a.name, price: a.price, category_id: id })))
+    const newAddonRows = validAddons.map(a => ({ id: uid(), name: a.name, price: a.price, category_id: id }))
+    await db.insert(addons).values(newAddonRows)
+    // CHANGED: also register the membership in the multi-category join table
+    await db.insert(addonCategories).values(newAddonRows.map(a => ({ addon_id: a.id, category_id: id })))
   }
   await createAuditLog(db, actor.id, 'create_category', 'category', id, null, { ...body, addon_count: validAddons.length }, null)
   return jsonOk({ id })
@@ -758,18 +777,32 @@ app.put('/api/menu/items/:id/availability', async (c) => {
 app.get('/api/menu/addons', async (c) => {
   const db = c.get('db')
   const list = await db.select().from(addons).orderBy(asc(addons.name))
-  return jsonOk(list)
+  // NEW: attach category_ids from the multi-category join table
+  const addonCategoriesAll = await db.select().from(addonCategories)
+  const listWithCategories = list.map(a => ({
+    ...a,
+    category_ids: addonCategoriesAll.filter(ac => ac.addon_id === a.id).map(ac => ac.category_id),
+  }))
+  return jsonOk(listWithCategories)
 })
 
 app.post('/api/menu/addons', async (c) => {
   const actor = c.get('user')
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
-  const body = await c.req.json<{ name: string; price: number; category_id?: string }>()
+  // CHANGED: category_ids (plural) replaces the old single category_id.
+  // category_id is still accepted for backward compat with older clients.
+  const body = await c.req.json<{ name: string; price: number; category_id?: string; category_ids?: string[] }>()
   const id = uid()
-  await db.insert(addons).values({ id, name: body.name, price: body.price, category_id: body.category_id ?? null })
+  const categoryIds = body.category_ids?.length ? body.category_ids : (body.category_id ? [body.category_id] : [])
+  // Legacy scalar column keeps the first assigned category (or null), for
+  // any code path that hasn't migrated to reading addon_categories yet.
+  await db.insert(addons).values({ id, name: body.name, price: body.price, category_id: categoryIds[0] ?? null })
+  if (categoryIds.length) {
+    await db.insert(addonCategories).values(categoryIds.map(cid => ({ addon_id: id, category_id: cid })))
+  }
   // Bug #7 fix: missing audit log for addon creation
-  await createAuditLog(db, actor.id, 'create_addon', 'addon', id, null, { name: body.name, price: body.price, category_id: body.category_id }, null)
+  await createAuditLog(db, actor.id, 'create_addon', 'addon', id, null, { name: body.name, price: body.price, category_ids: categoryIds }, null)
   return jsonOk({ id })
 })
 
@@ -778,7 +811,7 @@ app.put('/api/menu/addons/:id', async (c) => {
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const id = c.req.param('id')
-  const body = await c.req.json<{ name?: string; price?: number; is_available?: boolean; category_id?: string | null }>()
+  const body = await c.req.json<{ name?: string; price?: number; is_available?: boolean; category_id?: string | null; category_ids?: string[] }>()
   // Bug #7 fix: whitelist fields (mirrors category/item pattern) + add audit log
   const old = await db.select().from(addons).where(eq(addons.id, id)).get()
   if (!old) return jsonErr('Addon not found', 404)
@@ -786,10 +819,25 @@ app.put('/api/menu/addons/:id', async (c) => {
   if (body.name         !== undefined) safeFields.name         = body.name
   if (body.price        !== undefined) safeFields.price        = body.price
   if (body.is_available !== undefined) safeFields.is_available = body.is_available
-  // NEW: allow re-assigning an add-on to a different category (or null to unassign)
-  if (body.category_id  !== undefined) safeFields.category_id  = body.category_id
+  // CHANGED: category_ids (plural) is now the source of truth for category
+  // membership; when provided it fully replaces the add-on's category set.
+  if (body.category_ids !== undefined) {
+    await db.delete(addonCategories).where(eq(addonCategories.addon_id, id))
+    if (body.category_ids.length) {
+      await db.insert(addonCategories).values(body.category_ids.map(cid => ({ addon_id: id, category_id: cid })))
+    }
+    // Keep the legacy scalar column roughly in sync (first category, or null)
+    safeFields.category_id = body.category_ids[0] ?? null
+  } else if (body.category_id !== undefined) {
+    // Backward-compat path: old clients sending a single category_id.
+    safeFields.category_id = body.category_id
+    await db.delete(addonCategories).where(eq(addonCategories.addon_id, id))
+    if (body.category_id) {
+      await db.insert(addonCategories).values({ addon_id: id, category_id: body.category_id })
+    }
+  }
   await db.update(addons).set(safeFields).where(eq(addons.id, id))
-  await createAuditLog(db, actor.id, 'edit_addon', 'addon', id, old, safeFields, null)
+  await createAuditLog(db, actor.id, 'edit_addon', 'addon', id, old, { ...safeFields, category_ids: body.category_ids }, null)
   return jsonOk({ ok: true })
 })
 
@@ -803,6 +851,8 @@ app.delete('/api/menu/addons/:id', async (c) => {
   // Bug #9 fix: remove dangling item_addons rows before deleting the addon.
   // Without this, menu items silently lose their addon associations.
   await db.delete(itemAddons).where(eq(itemAddons.addon_id, id))
+  // NEW: remove dangling addon_categories rows too
+  await db.delete(addonCategories).where(eq(addonCategories.addon_id, id))
   await db.delete(addons).where(eq(addons.id, id))
   // Bug #7 fix: missing audit log for addon deletion
   await createAuditLog(db, actor.id, 'delete_addon', 'addon', id, { name: existing.name }, null, null)
