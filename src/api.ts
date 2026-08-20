@@ -211,7 +211,8 @@ export function useCreateAddon() {
   const api = useApi()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { name: string; price: number; category_id?: string }) => api.post('/menu/addons', body),
+    // CHANGED: category_ids (plural) — an add-on can be assigned to several categories at once
+    mutationFn: (body: { name: string; price: number; category_ids?: string[] }) => api.post('/menu/addons', body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })
 }
@@ -220,7 +221,8 @@ export function useUpdateAddon() {
   const api = useApi()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: string; name?: string; price?: number; is_available?: boolean }) =>
+    // CHANGED: category_ids (plural) replaces the add-on's full category set when provided
+    mutationFn: ({ id, ...body }: { id: string; name?: string; price?: number; is_available?: boolean; category_ids?: string[] }) =>
       api.put(`/menu/addons/${id}`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })

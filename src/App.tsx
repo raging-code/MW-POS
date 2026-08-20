@@ -3457,7 +3457,8 @@ function AdminMenuPage() {
   const [showAddAddon, setShowAddAddon] = useState(false);
   const [editItem, setEditItem] = useState<MenuItem | null>(null);
   const [newItem, setNewItem] = useState({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }], addon_ids: [] as string[] });
-  const [newAddon, setNewAddon] = useState({ name: '', price: '', category_id: '' });
+  // CHANGED: category_ids (plural) — an add-on can be assigned to multiple categories
+  const [newAddon, setNewAddon] = useState({ name: '', price: '', category_ids: [] as string[] });
 
   const categories = useMemo(() => menuData?.categories ?? [], [menuData]);
   const sortedCategories = useMemo(() => [...categories].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)), [categories]);
@@ -3499,8 +3500,8 @@ function AdminMenuPage() {
     if (!newAddon.name || !newAddon.price) return;
     // FIX [H]: catch API errors (e.g. duplicate add-on name)
     try {
-      await createAddon.mutateAsync({ name: newAddon.name, price: parseFloat(newAddon.price), category_id: newAddon.category_id || undefined });
-      setNewAddon({ name: '', price: '', category_id: '' });
+      await createAddon.mutateAsync({ name: newAddon.name, price: parseFloat(newAddon.price), category_ids: newAddon.category_ids });
+      setNewAddon({ name: '', price: '', category_ids: [] });
       setShowAddAddon(false);
       toast('Add-on added');
     } catch (e: unknown) {
@@ -3672,11 +3673,12 @@ function AdminMenuPage() {
                 <div key={addon.id}
                   className="flex items-center justify-between bg-white border border-gray-150 rounded-2xl px-4 py-3.5 shadow-sm">
                   <div>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <div className="text-gray-900 font-700 text-sm" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{addon.name}</div>
-                      {addon.category_id && (
-                        <Badge color="gray">{categories.find((c: Category) => c.id === addon.category_id)?.name ?? 'unknown'}</Badge>
-                      )}
+                      {/* CHANGED: an add-on can now belong to multiple categories, show a badge per category */}
+                      {(addon.category_ids ?? []).map(cid => (
+                        <Badge key={cid} color="gray">{categories.find((c: Category) => c.id === cid)?.name ?? 'unknown'}</Badge>
+                      ))}
                     </div>
                     <div className="text-xs font-800 mt-0.5 text-amber-700" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
                       +{fmt(addon.price)}
@@ -3897,15 +3899,50 @@ function AdminMenuPage() {
         )}
       </Modal>
 
-      <Modal open={showAddAddon} onClose={() => setShowAddAddon(false)} title="Add Add-on">
+      <Modal open={showAddAddon}
+        onClose={() => { setShowAddAddon(false); setNewAddon({ name: '', price: '', category_ids: [] }); }}
+        title="Add Add-on">
         <div className="flex flex-col gap-4">
           <Input label="Add-on Name" value={newAddon.name} onChange={v => setNewAddon(p => ({ ...p, name: v }))} autoFocus />
           <Input label="Price (₱)" type="number" value={newAddon.price} onChange={v => setNewAddon(p => ({ ...p, price: v }))} min={0} step={0.01} />
-          <Select label="Category" value={newAddon.category_id}
-            onChange={v => setNewAddon(p => ({ ...p, category_id: v }))}
-            options={[{ value: '', label: '— No category (global) —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
+          {/* CHANGED: category is now a multi-select checklist instead of a single-choice dropdown,
+              so one add-on can be assigned to several categories at once. Leaving everything
+              unchecked keeps the add-on global (same as the old "— No category —" option). */}
+          <div>
+            <label className="text-xs font-700 text-gray-500 uppercase tracking-widest" style={{ fontFamily: 'var(--font-display)', fontWeight: 700, letterSpacing: '0.08em' }}>
+              Categories
+            </label>
+            <div className="mt-1.5 flex flex-col gap-1 max-h-48 overflow-y-auto border border-gray-200 rounded-xl p-2.5">
+              {categories.length === 0 && (
+                <div className="text-xs text-gray-400 px-1 py-1">No categories yet</div>
+              )}
+              {categories.map((c: Category) => {
+                const checked = newAddon.category_ids.includes(c.id);
+                return (
+                  <label key={c.id}
+                    className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-gray-50 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => setNewAddon(p => ({
+                        ...p,
+                        category_ids: checked
+                          ? p.category_ids.filter(id => id !== c.id)
+                          : [...p.category_ids, c.id],
+                      }))}
+                      className="w-4 h-4 rounded border-gray-300 text-yellow-500 focus:ring-yellow-400 focus:ring-offset-0 cursor-pointer"
+                    />
+                    <span className="text-sm font-medium text-gray-800">{c.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+            {newAddon.category_ids.length === 0 && (
+              <div className="text-[11px] text-gray-400 mt-1 px-0.5">No categories selected — this add-on will be global.</div>
+            )}
+          </div>
           <div className="flex gap-2">
-            <Btn variant="secondary" onClick={() => setShowAddAddon(false)} className="flex-1">Cancel</Btn>
+            <Btn variant="secondary" onClick={() => { setShowAddAddon(false); setNewAddon({ name: '', price: '', category_ids: [] }); }} className="flex-1">Cancel</Btn>
             <Btn variant="mango" onClick={handleAddAddon} loading={createAddon.isPending}
               disabled={!newAddon.name || !newAddon.price} className="flex-1">Add</Btn>
           </div>

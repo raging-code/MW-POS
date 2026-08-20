@@ -33,7 +33,8 @@ export interface Addon {
   name: string;
   price: number;
   is_available: boolean;
-  category_id: string | null;
+  category_id: string | null; // legacy, kept for backward compat
+  category_ids: string[];     // NEW: an add-on can belong to multiple categories
 }
 
 export interface MenuItem {
