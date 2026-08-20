@@ -3450,14 +3450,12 @@ function AdminMenuPage() {
   const reorderCategory = useReorderCategory();
 
   const [tab, setTab] = useState<'items' | 'addons'>('items');
-  const [showAddCategory, setShowAddCategory] = useState(false);
   const [newCatName, setNewCatName] = useState('');
-  const [newCatAddons, setNewCatAddons] = useState<{ name: string; price: string }[]>([{ name: '', price: '' }]);
   const [showAddItem, setShowAddItem] = useState(false);
   const [showAddAddon, setShowAddAddon] = useState(false);
   const [editItem, setEditItem] = useState<MenuItem | null>(null);
-  const [newItem, setNewItem] = useState({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }], addon_ids: [] as string[] });
-  const [newAddon, setNewAddon] = useState({ name: '', price: '', category_id: '' });
+  const [newItem, setNewItem] = useState({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }] });
+  const [newAddon, setNewAddon] = useState({ name: '', price: '' });
 
   const categories = useMemo(() => menuData?.categories ?? [], [menuData]);
   const sortedCategories = useMemo(() => [...categories].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)), [categories]);
@@ -3465,29 +3463,23 @@ function AdminMenuPage() {
 
   const handleAddCategory = useCallback(async () => {
     if (!newCatName.trim()) return;
-    // NEW: this category's add-on set, created together with the category
-    const catAddons = newCatAddons
-      .filter(a => a.name.trim() && a.price)
-      .map(a => ({ name: a.name.trim(), price: parseFloat(a.price) }));
     // FIX [F]: surface API errors (e.g. duplicate name) instead of swallowing them
     try {
-      await createCategory.mutateAsync({ name: newCatName, sort_order: categories.length, addons: catAddons });
+      await createCategory.mutateAsync({ name: newCatName, sort_order: categories.length });
       setNewCatName('');
-      setNewCatAddons([{ name: '', price: '' }]);
-      setShowAddCategory(false);
       toast('Category added');
     } catch (e: unknown) {
       toast(e instanceof Error ? e.message : 'Failed to add category', 'error');
     }
-  }, [createCategory, newCatName, newCatAddons, categories.length]);
+  }, [createCategory, newCatName, categories.length]);
 
   const handleAddItem = useCallback(async () => {
     const sizes = newItem.sizes.filter(s => s.name && s.price).map(s => ({ name: s.name, price: parseFloat(s.price) }));
     if (!newItem.name || !sizes.length) return;
     // FIX [G]: catch API errors so the form stays open and user sees the problem
     try {
-      await createItem.mutateAsync({ name: newItem.name, category_id: newItem.category_id || undefined, sizes, addon_ids: newItem.addon_ids });
-      setNewItem({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }], addon_ids: [] });
+      await createItem.mutateAsync({ name: newItem.name, category_id: newItem.category_id || undefined, sizes });
+      setNewItem({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }] });
       setShowAddItem(false);
       toast('Item added');
     } catch (e: unknown) {
@@ -3499,8 +3491,8 @@ function AdminMenuPage() {
     if (!newAddon.name || !newAddon.price) return;
     // FIX [H]: catch API errors (e.g. duplicate add-on name)
     try {
-      await createAddon.mutateAsync({ name: newAddon.name, price: parseFloat(newAddon.price), category_id: newAddon.category_id || undefined });
-      setNewAddon({ name: '', price: '', category_id: '' });
+      await createAddon.mutateAsync({ name: newAddon.name, price: parseFloat(newAddon.price) });
+      setNewAddon({ name: '', price: '' });
       setShowAddAddon(false);
       toast('Add-on added');
     } catch (e: unknown) {
@@ -3511,16 +3503,11 @@ function AdminMenuPage() {
   const [editForm, setEditForm] = useState<{
     name: string; category_id: string;
     sizes: { id?: string; name: string; price: string }[];
-    addon_ids: string[];
   } | null>(null);
 
   const openEditItem = useCallback((item: MenuItem) => {
     setEditItem(item);
-    setEditForm({
-      name: item.name, category_id: item.category_id ?? '',
-      sizes: item.sizes.map(s => ({ id: s.id, name: s.name, price: String(s.price) })),
-      addon_ids: item.addons.map(a => a.id),
-    });
+    setEditForm({ name: item.name, category_id: item.category_id ?? '', sizes: item.sizes.map(s => ({ id: s.id, name: s.name, price: String(s.price) })) });
   }, []);
 
   const handleEditItem = useCallback(async () => {
@@ -3532,7 +3519,7 @@ function AdminMenuPage() {
       // Bug #11 fix: send null instead of undefined when category_id is cleared.
       // undefined is silently omitted by Drizzle's SET clause, leaving the item
       // in its current category. null produces SET category_id = NULL as intended.
-      await updateItem.mutateAsync({ id: editItem.id, name: editForm.name, category_id: editForm.category_id || null, sizes, addon_ids: editForm.addon_ids });
+      await updateItem.mutateAsync({ id: editItem.id, name: editForm.name, category_id: editForm.category_id || null, sizes });
       setEditItem(null); setEditForm(null);
       toast('Item updated');
     } catch (e: unknown) {
@@ -3584,7 +3571,8 @@ function AdminMenuPage() {
         ) : tab === 'items' ? (
           <div className="max-w-3xl mx-auto space-y-5">
             <div className="flex gap-2">
-              <Btn variant="leaf" onClick={() => setShowAddCategory(true)}>
+              <Input value={newCatName} onChange={setNewCatName} placeholder="New category name…" className="flex-1" />
+              <Btn variant="leaf" onClick={handleAddCategory} disabled={!newCatName.trim()} loading={createCategory.isPending}>
                 <Plus size={14} /> Add Category
               </Btn>
             </div>
@@ -3672,12 +3660,7 @@ function AdminMenuPage() {
                 <div key={addon.id}
                   className="flex items-center justify-between bg-white border border-gray-150 rounded-2xl px-4 py-3.5 shadow-sm">
                   <div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="text-gray-900 font-700 text-sm" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{addon.name}</div>
-                      {addon.category_id && (
-                        <Badge color="gray">{categories.find((c: Category) => c.id === addon.category_id)?.name ?? 'unknown'}</Badge>
-                      )}
-                    </div>
+                    <div className="text-gray-900 font-700 text-sm" style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>{addon.name}</div>
                     <div className="text-xs font-800 mt-0.5 text-amber-700" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
                       +{fmt(addon.price)}
                     </div>
@@ -3718,45 +3701,11 @@ function AdminMenuPage() {
         )}
       </div>
 
-      <Modal open={showAddCategory} onClose={() => setShowAddCategory(false)} title="Add Category" maxWidth="max-w-md">
-        <div className="flex flex-col gap-4">
-          <Input label="Category Name" value={newCatName} onChange={setNewCatName} placeholder="e.g. Milk Tea" autoFocus />
-          <div>
-            <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
-              style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Add-ons for this category</div>
-            {newCatAddons.map((a, i) => (
-              <div key={i} className="flex gap-2 mb-2 items-start">
-                <Input value={a.name} onChange={v => setNewCatAddons(p => p.map((ad, j) => j === i ? { ...ad, name: v } : ad))}
-                  placeholder="Add-on name" className="flex-1" />
-                <Input type="number" value={a.price}
-                  onChange={v => setNewCatAddons(p => p.map((ad, j) => j === i ? { ...ad, price: v } : ad))}
-                  placeholder="Price" className="w-24" />
-                {newCatAddons.length > 1 && (
-                  <button onClick={() => setNewCatAddons(p => p.filter((_, j) => j !== i))}
-                    className="text-gray-400 hover:text-red-500 mt-2.5 p-1.5 rounded-lg hover:bg-red-50 transition-colors">
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-            ))}
-            <Btn size="sm" variant="ghost" onClick={() => setNewCatAddons(p => [...p, { name: '', price: '' }])}>
-              <Plus size={12} /> Add Add-on
-            </Btn>
-          </div>
-          <Divider />
-          <div className="flex gap-2">
-            <Btn variant="secondary" onClick={() => setShowAddCategory(false)} className="flex-1">Cancel</Btn>
-            <Btn variant="mango" onClick={handleAddCategory} loading={createCategory.isPending}
-              disabled={!newCatName.trim()} className="flex-1">Add Category</Btn>
-          </div>
-        </div>
-      </Modal>
-
       <Modal open={showAddItem} onClose={() => setShowAddItem(false)} title="Add Menu Item" maxWidth="max-w-md">
         <div className="flex flex-col gap-4">
           <Input label="Item Name" value={newItem.name} onChange={v => setNewItem(p => ({ ...p, name: v }))} autoFocus />
           <Select label="Category" value={newItem.category_id}
-            onChange={v => setNewItem(p => ({ ...p, category_id: v, addon_ids: [] }))}
+            onChange={v => setNewItem(p => ({ ...p, category_id: v }))}
             options={[{ value: '', label: '— No category —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
           <div>
             <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
@@ -3780,32 +3729,6 @@ function AdminMenuPage() {
               <Plus size={12} /> Add Size
             </Btn>
           </div>
-          {newItem.category_id && (categories.find((c: Category) => c.id === newItem.category_id)?.addons?.length ?? 0) > 0 && (
-            <div>
-              <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
-                style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Add-ons (optional)</div>
-              <div className="flex flex-wrap gap-1.5">
-                {categories.find((c: Category) => c.id === newItem.category_id)?.addons.map((a: Addon) => {
-                  const selected = newItem.addon_ids.includes(a.id);
-                  return (
-                    <button key={a.id} type="button"
-                      onClick={() => setNewItem(p => ({
-                        ...p,
-                        addon_ids: selected ? p.addon_ids.filter(id => id !== a.id) : [...p.addon_ids, a.id],
-                      }))}
-                      className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-colors border',
-                        selected
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
-                      )}
-                      style={{ fontWeight: 700 }}>
-                      {a.name} (+{fmt(a.price)})
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
           <Divider />
           <div className="flex gap-2">
             <Btn variant="secondary" onClick={() => setShowAddItem(false)} className="flex-1">Cancel</Btn>
@@ -3820,7 +3743,7 @@ function AdminMenuPage() {
           <div className="flex flex-col gap-4">
             <Input label="Item Name" value={editForm.name} onChange={v => setEditForm(p => p ? { ...p, name: v } : null)} />
             <Select label="Category" value={editForm.category_id}
-              onChange={v => setEditForm(p => p ? { ...p, category_id: v, addon_ids: [] } : null)}
+              onChange={v => setEditForm(p => p ? { ...p, category_id: v } : null)}
               options={[{ value: '', label: '— No category —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
             <div>
               <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
@@ -3845,32 +3768,6 @@ function AdminMenuPage() {
                 <Plus size={12} /> Add Size
               </Btn>
             </div>
-            {editForm.category_id && (categories.find((c: Category) => c.id === editForm.category_id)?.addons?.length ?? 0) > 0 && (
-              <div>
-                <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
-                  style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Add-ons (optional)</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {categories.find((c: Category) => c.id === editForm.category_id)?.addons.map((a: Addon) => {
-                    const selected = editForm.addon_ids.includes(a.id);
-                    return (
-                      <button key={a.id} type="button"
-                        onClick={() => setEditForm(p => p ? {
-                          ...p,
-                          addon_ids: selected ? p.addon_ids.filter(id => id !== a.id) : [...p.addon_ids, a.id],
-                        } : null)}
-                        className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-colors border',
-                          selected
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
-                        )}
-                        style={{ fontWeight: 700 }}>
-                        {a.name} (+{fmt(a.price)})
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
             <Divider />
             <div className="flex gap-2">
               <Btn variant="secondary" onClick={() => { setEditItem(null); setEditForm(null); }} className="flex-1">Cancel</Btn>
@@ -3887,9 +3784,6 @@ function AdminMenuPage() {
         <div className="flex flex-col gap-4">
           <Input label="Add-on Name" value={newAddon.name} onChange={v => setNewAddon(p => ({ ...p, name: v }))} autoFocus />
           <Input label="Price (₱)" type="number" value={newAddon.price} onChange={v => setNewAddon(p => ({ ...p, price: v }))} min={0} step={0.01} />
-          <Select label="Category" value={newAddon.category_id}
-            onChange={v => setNewAddon(p => ({ ...p, category_id: v }))}
-            options={[{ value: '', label: '— No category (global) —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
           <div className="flex gap-2">
             <Btn variant="secondary" onClick={() => setShowAddAddon(false)} className="flex-1">Cancel</Btn>
             <Btn variant="mango" onClick={handleAddAddon} loading={createAddon.isPending}

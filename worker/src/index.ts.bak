@@ -81,7 +81,6 @@ const addons = sqliteTable('addons', {
   name:         text('name').notNull(),
   price:        real('price').notNull(),
   is_available: integer('is_available', { mode: 'boolean' }).notNull().default(true),
-  category_id:  text('category_id').references(() => categories.id),
 })
 
 const itemAddons = sqliteTable('item_addons', {
@@ -575,8 +574,6 @@ app.get('/api/menu', async (c) => {
 
   const menu = cats.map(cat => ({
     ...cat,
-    // NEW: this category's own add-on set (category-scoped, not global)
-    addons: addonsAll.filter(a => a.category_id === cat.id),
     items: items
       .filter(i => i.category_id === cat.id)
       .map(item => ({
@@ -595,18 +592,10 @@ app.post('/api/menu/categories', async (c) => {
   const actor = c.get('user')
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
-  const body = await c.req.json<{
-    name: string; sort_order?: number;
-    addons?: { name: string; price: number }[];
-  }>()
+  const body = await c.req.json<{ name: string; sort_order?: number }>()
   const id = uid()
   await db.insert(categories).values({ id, name: body.name, sort_order: body.sort_order ?? 0 })
-  // NEW: create this category's own add-on set in the same request
-  const validAddons = (body.addons ?? []).filter(a => a.name && typeof a.price === 'number' && !isNaN(a.price))
-  if (validAddons.length) {
-    await db.insert(addons).values(validAddons.map(a => ({ id: uid(), name: a.name, price: a.price, category_id: id })))
-  }
-  await createAuditLog(db, actor.id, 'create_category', 'category', id, null, { ...body, addon_count: validAddons.length }, null)
+  await createAuditLog(db, actor.id, 'create_category', 'category', id, null, body, null)
   return jsonOk({ id })
 })
 
@@ -765,11 +754,11 @@ app.post('/api/menu/addons', async (c) => {
   const actor = c.get('user')
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
-  const body = await c.req.json<{ name: string; price: number; category_id?: string }>()
+  const body = await c.req.json<{ name: string; price: number }>()
   const id = uid()
-  await db.insert(addons).values({ id, name: body.name, price: body.price, category_id: body.category_id ?? null })
+  await db.insert(addons).values({ id, name: body.name, price: body.price })
   // Bug #7 fix: missing audit log for addon creation
-  await createAuditLog(db, actor.id, 'create_addon', 'addon', id, null, { name: body.name, price: body.price, category_id: body.category_id }, null)
+  await createAuditLog(db, actor.id, 'create_addon', 'addon', id, null, { name: body.name, price: body.price }, null)
   return jsonOk({ id })
 })
 
@@ -778,7 +767,7 @@ app.put('/api/menu/addons/:id', async (c) => {
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const id = c.req.param('id')
-  const body = await c.req.json<{ name?: string; price?: number; is_available?: boolean; category_id?: string | null }>()
+  const body = await c.req.json<{ name?: string; price?: number; is_available?: boolean }>()
   // Bug #7 fix: whitelist fields (mirrors category/item pattern) + add audit log
   const old = await db.select().from(addons).where(eq(addons.id, id)).get()
   if (!old) return jsonErr('Addon not found', 404)
@@ -786,8 +775,6 @@ app.put('/api/menu/addons/:id', async (c) => {
   if (body.name         !== undefined) safeFields.name         = body.name
   if (body.price        !== undefined) safeFields.price        = body.price
   if (body.is_available !== undefined) safeFields.is_available = body.is_available
-  // NEW: allow re-assigning an add-on to a different category (or null to unassign)
-  if (body.category_id  !== undefined) safeFields.category_id  = body.category_id
   await db.update(addons).set(safeFields).where(eq(addons.id, id))
   await createAuditLog(db, actor.id, 'edit_addon', 'addon', id, old, safeFields, null)
   return jsonOk({ ok: true })

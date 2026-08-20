@@ -136,9 +136,7 @@ export function useCreateCategory() {
   const api = useApi()
   const qc = useQueryClient()
   return useMutation({
-    // NEW: addons — this category's own add-on set, created in the same request
-    mutationFn: (body: { name: string; sort_order?: number; addons?: { name: string; price: number }[] }) =>
-      api.post('/menu/categories', body),
+    mutationFn: (body: { name: string; sort_order?: number }) => api.post('/menu/categories', body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })
 }
@@ -169,8 +167,7 @@ export function useCreateMenuItem() {
   const api = useApi()
   const qc = useQueryClient()
   return useMutation({
-    // NEW: addon_ids — which of the category's add-ons apply to this item
-    mutationFn: (body: { name: string; category_id?: string; sizes: { name: string; price: number }[]; addon_ids?: string[] }) =>
+    mutationFn: (body: { name: string; category_id?: string; sizes: { name: string; price: number }[] }) =>
       api.post('/menu/items', body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })
@@ -181,8 +178,7 @@ export function useUpdateMenuItem() {
   const qc = useQueryClient()
   return useMutation({
     // Bug #11 fix: category_id can be null to unassign a category from an item.
-    // NEW: addon_ids — replaces this item's assigned add-ons when provided.
-    mutationFn: ({ id, ...body }: { id: string; name?: string; category_id?: string | null; is_active?: boolean; sizes?: { name: string; price: number }[]; addon_ids?: string[] }) =>
+    mutationFn: ({ id, ...body }: { id: string; name?: string; category_id?: string | null; is_active?: boolean; sizes?: { name: string; price: number }[] }) =>
       api.put(`/menu/items/${id}`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })
@@ -211,7 +207,7 @@ export function useCreateAddon() {
   const api = useApi()
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (body: { name: string; price: number; category_id?: string }) => api.post('/menu/addons', body),
+    mutationFn: (body: { name: string; price: number }) => api.post('/menu/addons', body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })
 }
