@@ -3756,7 +3756,7 @@ function AdminMenuPage() {
         <div className="flex flex-col gap-4">
           <Input label="Item Name" value={newItem.name} onChange={v => setNewItem(p => ({ ...p, name: v }))} autoFocus />
           <Select label="Category" value={newItem.category_id}
-            onChange={v => setNewItem(p => ({ ...p, category_id: v, addon_ids: [] }))}
+            onChange={v => setNewItem(p => ({ ...p, category_id: v }))}
             options={[{ value: '', label: '— No category —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
           <div>
             <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
@@ -3780,29 +3780,36 @@ function AdminMenuPage() {
               <Plus size={12} /> Add Size
             </Btn>
           </div>
-          {newItem.category_id && (categories.find((c: Category) => c.id === newItem.category_id)?.addons?.length ?? 0) > 0 && (
+          {categories.some((c: Category) => (c.addons?.length ?? 0) > 0) && (
             <div>
               <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
                 style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Add-ons (optional)</div>
-              <div className="flex flex-wrap gap-1.5">
-                {categories.find((c: Category) => c.id === newItem.category_id)?.addons.map((a: Addon) => {
-                  const selected = newItem.addon_ids.includes(a.id);
-                  return (
-                    <button key={a.id} type="button"
-                      onClick={() => setNewItem(p => ({
-                        ...p,
-                        addon_ids: selected ? p.addon_ids.filter(id => id !== a.id) : [...p.addon_ids, a.id],
-                      }))}
-                      className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-colors border',
-                        selected
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
-                      )}
-                      style={{ fontWeight: 700 }}>
-                      {a.name} (+{fmt(a.price)})
-                    </button>
-                  );
-                })}
+              <div className="flex flex-col gap-3">
+                {categories.filter((c: Category) => (c.addons?.length ?? 0) > 0).map((c: Category) => (
+                  <div key={c.id}>
+                    <div className="text-[11px] font-700 text-gray-400 uppercase tracking-wide mb-1.5">{c.name}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {c.addons.map((a: Addon) => {
+                        const selected = newItem.addon_ids.includes(a.id);
+                        return (
+                          <button key={a.id} type="button"
+                            onClick={() => setNewItem(p => ({
+                              ...p,
+                              addon_ids: selected ? p.addon_ids.filter(id => id !== a.id) : [...p.addon_ids, a.id],
+                            }))}
+                            className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-colors border',
+                              selected
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
+                            )}
+                            style={{ fontWeight: 700 }}>
+                            {a.name} (+{fmt(a.price)})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -3820,7 +3827,7 @@ function AdminMenuPage() {
           <div className="flex flex-col gap-4">
             <Input label="Item Name" value={editForm.name} onChange={v => setEditForm(p => p ? { ...p, name: v } : null)} />
             <Select label="Category" value={editForm.category_id}
-              onChange={v => setEditForm(p => p ? { ...p, category_id: v, addon_ids: [] } : null)}
+              onChange={v => setEditForm(p => p ? { ...p, category_id: v } : null)}
               options={[{ value: '', label: '— No category —' }, ...categories.map((c: Category) => ({ value: c.id, label: c.name }))]} />
             <div>
               <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
@@ -3845,29 +3852,36 @@ function AdminMenuPage() {
                 <Plus size={12} /> Add Size
               </Btn>
             </div>
-            {editForm.category_id && (categories.find((c: Category) => c.id === editForm.category_id)?.addons?.length ?? 0) > 0 && (
+            {categories.some((c: Category) => (c.addons?.length ?? 0) > 0) && (
               <div>
                 <div className="text-xs font-800 text-gray-500 uppercase tracking-widest mb-2.5"
                   style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>Add-ons (optional)</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {categories.find((c: Category) => c.id === editForm.category_id)?.addons.map((a: Addon) => {
-                    const selected = editForm.addon_ids.includes(a.id);
-                    return (
-                      <button key={a.id} type="button"
-                        onClick={() => setEditForm(p => p ? {
-                          ...p,
-                          addon_ids: selected ? p.addon_ids.filter(id => id !== a.id) : [...p.addon_ids, a.id],
-                        } : null)}
-                        className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-colors border',
-                          selected
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                            : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
-                        )}
-                        style={{ fontWeight: 700 }}>
-                        {a.name} (+{fmt(a.price)})
-                      </button>
-                    );
-                  })}
+                <div className="flex flex-col gap-3">
+                  {categories.filter((c: Category) => (c.addons?.length ?? 0) > 0).map((c: Category) => (
+                    <div key={c.id}>
+                      <div className="text-[11px] font-700 text-gray-400 uppercase tracking-wide mb-1.5">{c.name}</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {c.addons.map((a: Addon) => {
+                          const selected = editForm.addon_ids.includes(a.id);
+                          return (
+                            <button key={a.id} type="button"
+                              onClick={() => setEditForm(p => p ? {
+                                ...p,
+                                addon_ids: selected ? p.addon_ids.filter(id => id !== a.id) : [...p.addon_ids, a.id],
+                              } : null)}
+                              className={clsx('px-3 py-1.5 rounded-xl text-xs font-700 transition-colors border',
+                                selected
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
+                              )}
+                              style={{ fontWeight: 700 }}>
+                              {a.name} (+{fmt(a.price)})
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
