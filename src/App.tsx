@@ -1078,9 +1078,9 @@ function Header() {
 
 // ─── Cart Addon Picker Modal ───────────────────────────────────
 function CartAddonPickerModal({
-  cartKey, currentAddons, allAddons, onClose,
+  cartKey, currentAddons, categoryId, allAddons, onClose,
 }: {
-  cartKey: string; currentAddons: CartAddon[]; allAddons: Addon[]; onClose: () => void;
+  cartKey: string; currentAddons: CartAddon[]; categoryId: string | null; allAddons: Addon[]; onClose: () => void;
 }) {
   // FIX: Select only the setAddons action — it is a stable reference in Zustand
   // so this selector never causes a re-render. The full useCartStore() subscription
@@ -1102,7 +1102,16 @@ function CartAddonPickerModal({
   }, []);
 
   const handleApply = useCallback(() => { setAddons(cartKey, selected); onClose(); }, [setAddons, cartKey, selected, onClose]);
-  const availableAddons = useMemo(() => allAddons.filter(a => a.is_available), [allAddons]);
+  // FIX: previously only filtered by is_available, so an add-on assigned
+  // to e.g. "Snacks" and "Rice Meals" would still show up for items in
+  // every other category too. Now also require the item's category to be
+  // in the add-on's category_ids.
+  const availableAddons = useMemo(
+    () => allAddons.filter(a =>
+      a.is_available && (categoryId == null || (a.category_ids ?? []).includes(categoryId))
+    ),
+    [allAddons, categoryId]
+  );
   const addonTotal = useMemo(() => selected.reduce((s, a) => s + a.addon_price * a.qty, 0), [selected]);
 
   return (
@@ -1208,6 +1217,7 @@ function POSPage() {
   const [addonPickerFor, setAddonPickerFor] = useState<{
     cartKey: string;
     currentAddons: CartAddon[];
+    categoryId: string | null;
   } | null>(null);
 
   // FIX: Local note state + debounce to prevent full POSPage re-render on every keystroke.
@@ -1246,8 +1256,8 @@ function POSPage() {
     }
   }, [cartNote]);
  
-  const handleOpenAddonPicker = useCallback((cartKey: string, currentAddons: CartAddon[]) => {
-    setAddonPickerFor({ cartKey, currentAddons });
+  const handleOpenAddonPicker = useCallback((cartKey: string, currentAddons: CartAddon[], categoryId: string | null) => {
+    setAddonPickerFor({ cartKey, currentAddons, categoryId });
   }, []);
 
   useEffect(() => {
@@ -1304,6 +1314,7 @@ function POSPage() {
     const price = sizePrice ?? item.sizes[0]?.price ?? 0;
     cart.addItem({
       item_id: item.id, item_name: item.name,
+      category_id: item.category_id,
       size_name: sizeName, base_price: price,
       addons: addons.map((a: Addon) => ({ addon_id: a.id, addon_name: a.name, addon_price: a.price, qty: 1 })),
     });
@@ -1669,6 +1680,7 @@ function POSPage() {
     <CartAddonPickerModal
       cartKey={addonPickerFor.cartKey}
       currentAddons={addonPickerFor.currentAddons}
+      categoryId={addonPickerFor.categoryId}
       allAddons={allAddons}
       onClose={() => setAddonPickerFor(null)}
     />
@@ -1685,7 +1697,7 @@ const CartItemRow = memo(function CartItemRow({
 }: {
   item: CartItem;
   allAddons: Addon[];
-  onOpenAddonPicker: (cartKey: string, currentAddons: CartAddon[]) => void;
+  onOpenAddonPicker: (cartKey: string, currentAddons: CartAddon[], categoryId: string | null) => void;
 }) {
   // FIX: Select only the three action functions from the cart store.
   // CartItemRow is memo'd and never reads cart STATE — it only calls actions.
@@ -1710,7 +1722,7 @@ const CartItemRow = memo(function CartItemRow({
   const handleQtyPlus   = useCallback(() => updateQty(item.cart_key, 1),  [updateQty, item.cart_key]);
   const handleScToggle  = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'sc'  ? null : 'sc'),  [setDiscount, item.cart_key, item.discount_type]);
   const handlePwdToggle = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd'), [setDiscount, item.cart_key, item.discount_type]);
-  const handleAddonTap  = useCallback(() => onOpenAddonPicker(item.cart_key, item.addons), [onOpenAddonPicker, item.cart_key, item.addons]);
+  const handleAddonTap  = useCallback(() => onOpenAddonPicker(item.cart_key, item.addons, item.category_id), [onOpenAddonPicker, item.cart_key, item.addons, item.category_id]);
  
   return (
     <article className="cart-item-row rounded-2xl overflow-hidden border border-gray-200 bg-white shadow-sm" aria-label={`${item.item_name} in cart`}>

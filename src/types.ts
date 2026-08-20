@@ -67,6 +67,7 @@ export interface CartItem {
   cart_key: string;
   item_id: string;
   item_name: string;
+  category_id: string | null;
   size_name?: string;
   base_price: number;
   qty: number;

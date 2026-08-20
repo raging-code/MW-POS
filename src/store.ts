@@ -176,7 +176,7 @@ interface CartStore {
   scPct: number;
   pwdPct: number;
   setDiscountPcts: (sc: number, pwd: number) => void;
-  addItem: (item: { item_id: string; item_name: string; size_name?: string; base_price: number; addons?: CartAddon[] }) => void;
+  addItem: (item: { item_id: string; item_name: string; category_id?: string | null; size_name?: string; base_price: number; addons?: CartAddon[] }) => void;
   removeItem: (cart_key: string) => void;
   updateQty: (cart_key: string, delta: number) => void;
   setDiscount: (cart_key: string, discount_type: DiscountType) => void;
@@ -203,7 +203,7 @@ export const useCartStore = create<CartStore>()((set, get) => ({
 
   setDiscountPcts: (sc, pwd) => set({ scPct: sc, pwdPct: pwd }),
 
-  addItem: ({ item_id, item_name, size_name, base_price, addons = [] }) => {
+  addItem: ({ item_id, item_name, category_id = null, size_name, base_price, addons = [] }) => {
     set((state) => {
       const key = cartKey(item_id, size_name, addons.map((a: CartAddon) => a.addon_id));
       const existing = state.cart.items.find((i: CartItem) => i.cart_key === key);
@@ -219,6 +219,7 @@ export const useCartStore = create<CartStore>()((set, get) => ({
         cart_key: key,
         item_id,
         item_name,
+        category_id,
         size_name,
         base_price,
         qty: 1,
