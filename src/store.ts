@@ -138,8 +138,12 @@ export const useUIStore = create<UIStore>((set, get) => ({
 // ============================================================
 // CART STORE
 // ============================================================
-function cartKey(itemId: string, sizeName?: string, addonIds?: string[]): string {
-  return [itemId, sizeName ?? '', ...(addonIds ?? []).sort()].join('|');
+function cartKey(itemId: string, sizeName?: string, addonIds?: string[], unique?: string): string {
+  // NEW: an optional `unique` suffix. addItem() passes a fresh id every time
+  // so that adding the "same" item twice always produces two distinct cart
+  // lines instead of merging into one line with qty: 2.
+  const base = [itemId, sizeName ?? '', ...(addonIds ?? []).sort()].join('|');
+  return unique ? `${base}|${unique}` : base;
 }
 
 function computeItemTotals(
@@ -205,16 +209,16 @@ export const useCartStore = create<CartStore>()((set, get) => ({
 
   addItem: ({ item_id, item_name, category_id = null, size_name, base_price, addons = [] }) => {
     set((state) => {
-      const key = cartKey(item_id, size_name, addons.map((a: CartAddon) => a.addon_id));
-      const existing = state.cart.items.find((i: CartItem) => i.cart_key === key);
-      if (existing) {
-        const updated = state.cart.items.map((i: CartItem) =>
-          i.cart_key === key
-            ? computeItemTotals({ ...i, qty: i.qty + 1 }, state.scPct, state.pwdPct)
-            : i
-        );
-        return { cart: { ...state.cart, items: updated } };
-      }
+      // CHANGED: no longer looks for an existing matching line to bump qty
+      // on. Every addItem() call now always appends a brand-new line, so
+      // ordering the same item twice gives you two independently
+      // editable lines (e.g. to put different add-ons on each one).
+      const key = cartKey(
+        item_id,
+        size_name,
+        addons.map((a: CartAddon) => a.addon_id),
+        crypto.randomUUID()
+      );
       const raw = {
         cart_key: key,
         item_id,
