@@ -53,6 +53,9 @@ export interface Category {
   sort_order: number;
   items: MenuItem[];
   addons: Addon[];
+  // NEW: when true, SC/PWD/manual discounts are blocked for items in
+  // this category.
+  discount_disabled: boolean;
 }
 
 // ─── Cart ─────────────────────────────────────────────────────

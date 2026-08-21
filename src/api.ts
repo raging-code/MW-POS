@@ -155,6 +155,16 @@ export function useDeleteCategory() {
   })
 }
 
+export function useUpdateCategory() {
+  const api = useApi()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, discount_disabled }: { id: string; discount_disabled: boolean }) =>
+      api.put(`/menu/categories/${id}`, { discount_disabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
+  })
+}
+
 export function useReorderCategory() {
   const api = useApi()
   const qc = useQueryClient()

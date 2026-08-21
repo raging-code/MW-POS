@@ -28,7 +28,7 @@ import {
   useReprintSale, useSalesReport, useSettings, useUpdateSettings,
   useUsers, useCreateUser, useUpdateUser, useDeleteUser, useResetPin,
   useAuditLogs, useToggleAvailability, useCreateMenuItem,
-  useUpdateMenuItem, useDeleteMenuItem, useCreateCategory,
+  useUpdateMenuItem, useDeleteMenuItem, useCreateCategory, useUpdateCategory,
   useUpdateAddon, useDeleteAddon, useCreateAddon, useEditSale,
   useDeleteCategory, useReorderCategory, useDetailedSalesReport,
 } from './api';
@@ -1533,6 +1533,7 @@ function POSPage() {
     key={item.cart_key}
     item={item}
     allAddons={allAddons}
+    discountDisabled={categories.find((c: Category) => c.id === item.category_id)?.discount_disabled ?? false}
     onOpenAddonPicker={handleOpenAddonPicker}
   />
                 ))}
@@ -1693,10 +1694,12 @@ function POSPage() {
 const CartItemRow = memo(function CartItemRow({
   item,
   allAddons,
+  discountDisabled,
   onOpenAddonPicker,
 }: {
   item: CartItem;
   allAddons: Addon[];
+  discountDisabled?: boolean;
   onOpenAddonPicker: (cartKey: string, currentAddons: CartAddon[], categoryId: string | null) => void;
 }) {
   // FIX: Select only the three action functions from the cart store.
@@ -1790,18 +1793,24 @@ const CartItemRow = memo(function CartItemRow({
  
       <div className="flex items-center gap-2 px-3 pb-2.5 pt-1">
         <span className="text-xs text-gray-400 font-medium">Discount:</span>
-        <button
-          onClick={handleScToggle}
-          aria-pressed={item.discount_type === 'sc'}
-          className={`discount-btn discount-btn-sc ${item.discount_type === 'sc' ? 'active' : ''}`}>
-          SC
-        </button>
-        <button
-          onClick={handlePwdToggle}
-          aria-pressed={item.discount_type === 'pwd'}
-          className={`discount-btn discount-btn-pwd ${item.discount_type === 'pwd' ? 'active' : ''}`}>
-          PWD
-        </button>
+        {discountDisabled ? (
+          <span className="text-[11px] text-gray-400 italic">Not available for this category</span>
+        ) : (
+          <>
+            <button
+              onClick={handleScToggle}
+              aria-pressed={item.discount_type === 'sc'}
+              className={`discount-btn discount-btn-sc ${item.discount_type === 'sc' ? 'active' : ''}`}>
+              SC
+            </button>
+            <button
+              onClick={handlePwdToggle}
+              aria-pressed={item.discount_type === 'pwd'}
+              className={`discount-btn discount-btn-pwd ${item.discount_type === 'pwd' ? 'active' : ''}`}>
+              PWD
+            </button>
+          </>
+        )}
         {item.discount_type && (
           <span className="ml-auto text-xs font-semibold text-emerald-600">
             −{fmt(item.discount_amount)}
@@ -3460,6 +3469,15 @@ function AdminMenuPage() {
   const deleteAddon = useDeleteAddon();
   const deleteCategory = useDeleteCategory();
   const reorderCategory = useReorderCategory();
+  const updateCategory = useUpdateCategory();
+  const handleToggleCategoryDiscount = useCallback(async (catId: string, currentlyDisabled: boolean) => {
+    try {
+      await updateCategory.mutateAsync({ id: catId, discount_disabled: !currentlyDisabled });
+      toast(!currentlyDisabled ? 'Discounts disabled for this category' : 'Discounts enabled for this category');
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Failed to update category', 'error');
+    }
+  }, [updateCategory]);
 
   const [tab, setTab] = useState<'items' | 'addons'>('items');
   const [showAddCategory, setShowAddCategory] = useState(false);
@@ -3617,6 +3635,18 @@ function AdminMenuPage() {
                     </div>
                     <div className="flex items-center gap-1">
                       <Badge color="gray">{cat.items.length} items</Badge>
+                      <button
+                        onClick={() => handleToggleCategoryDiscount(cat.id, cat.discount_disabled)}
+                        title={cat.discount_disabled ? 'Discounts are disabled for this category — click to enable' : 'Discounts are enabled for this category — click to disable'}
+                        aria-pressed={cat.discount_disabled}
+                        className={clsx('px-2.5 py-1 rounded-xl text-xs font-700 transition-colors border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
+                          cat.discount_disabled
+                            ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100'
+                            : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                        )}
+                        style={{ fontWeight: 700 }}>
+                        {cat.discount_disabled ? 'No Discount' : 'Discountable'}
+                      </button>
                       <button onClick={() => moveUp(cat.id)} disabled={isFirst} title="Move up"
                         className="p-1 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
                         <ArrowUp size={14} />

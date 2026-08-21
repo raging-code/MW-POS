@@ -11,7 +11,7 @@ import { drizzle, DrizzleD1Database } from 'drizzle-orm/d1'
 import {
   sqliteTable, text, integer, real, primaryKey,
 } from 'drizzle-orm/sqlite-core'
-import { eq, and, desc, asc, gte, lte, sql, not, or } from 'drizzle-orm'
+import { eq, and, desc, asc, gte, lte, sql, not, or, inArray } from 'drizzle-orm'
 
 // ============================================================
 // SECTION 2: ENV TYPE
@@ -55,9 +55,12 @@ const pinAttempts = sqliteTable('pin_attempts', {
 })
 
 const categories = sqliteTable('categories', {
-  id:         text('id').primaryKey(),
-  name:       text('name').notNull(),
-  sort_order: integer('sort_order').notNull().default(0),
+  id:                 text('id').primaryKey(),
+  name:               text('name').notNull(),
+  sort_order:         integer('sort_order').notNull().default(0),
+  // NEW: when true, SC/PWD/manual discounts are blocked for every item
+  // in this category (enforced both client-side and server-side).
+  discount_disabled:  integer('discount_disabled', { mode: 'boolean' }).notNull().default(false),
 })
 
 const menuItems = sqliteTable('menu_items', {
@@ -634,13 +637,14 @@ app.put('/api/menu/categories/:id', async (c) => {
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const id = c.req.param('id')
-  const body = await c.req.json<{ name?: string; sort_order?: number }>()
+  const body = await c.req.json<{ name?: string; sort_order?: number; discount_disabled?: boolean }>()
   const old = await db.select().from(categories).where(eq(categories.id, id)).get()
   if (!old) return jsonErr('Category not found', 404)
   // Bug #8 fix: whitelist fields instead of spreading raw body + add audit log
   const safeFields: Partial<typeof categories.$inferInsert> = {}
-  if (body.name       !== undefined) safeFields.name       = body.name
-  if (body.sort_order !== undefined) safeFields.sort_order = body.sort_order
+  if (body.name              !== undefined) safeFields.name              = body.name
+  if (body.sort_order        !== undefined) safeFields.sort_order        = body.sort_order
+  if (body.discount_disabled !== undefined) safeFields.discount_disabled = body.discount_disabled
   await db.update(categories).set(safeFields).where(eq(categories.id, id))
   await createAuditLog(db, actor.id, 'rename_category', 'category', id, old, safeFields, null)
   return jsonOk({ ok: true })
@@ -1037,14 +1041,28 @@ app.post('/api/sales', async (c) => {
   const scAmt = parseFloat(settings.find(s => s.key === 'sc_discount_pct')?.value ?? '20')
   const pwdAmt = parseFloat(settings.find(s => s.key === 'pwd_discount_pct')?.value ?? '20')
 
+  // NEW: never trust the client on which categories allow discounts — look
+  // each ordered item's category up fresh from the DB and check the flag.
+  const orderedItemIds = [...new Set(body.items.map(i => i.item_id))]
+  const itemCategoryRows = orderedItemIds.length
+    ? await db.select({ itemId: menuItems.id, discountDisabled: categories.discount_disabled })
+        .from(menuItems)
+        .leftJoin(categories, eq(menuItems.category_id, categories.id))
+        .where(inArray(menuItems.id, orderedItemIds))
+    : []
+  const discountDisabledByItemId = new Map(itemCategoryRows.map(r => [r.itemId, !!r.discountDisabled]))
+
   const saleItemRows: typeof saleItems.$inferInsert[] = []
   const addonRows: typeof saleItemAddons.$inferInsert[] = []
 
   for (const item of body.items) {
     const addonsTotal = item.addons.reduce((s, a) => s + a.addon_price * a.qty, 0)
     const itemBase = (item.base_price + addonsTotal) * item.qty
+    const categoryBlocksDiscount = discountDisabledByItemId.get(item.item_id) === true
     let discAmt = 0
-    if (item.discount_type === 'sc') discAmt = Math.min(scAmt, itemBase)
+    if (categoryBlocksDiscount) {
+      discAmt = 0
+    } else if (item.discount_type === 'sc') discAmt = Math.min(scAmt, itemBase)
     else if (item.discount_type === 'pwd') discAmt = Math.min(pwdAmt, itemBase)
     else if (item.discount_pct > 0) discAmt = itemBase * (item.discount_pct / 100)
     discAmt = Math.round(discAmt * 100) / 100
