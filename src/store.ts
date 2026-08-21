@@ -154,18 +154,27 @@ function computeItemTotals(
   const addons_total = item.addons.reduce((s, a) => s + a.addon_price * a.qty, 0);
   const perUnit = item.base_price + addons_total;
   const total_before_discount = perUnit * item.qty;
-  let discPct = item.discount_pct / 100;
-  if (item.discount_type === 'sc') discPct = scPct / 100;
-  if (item.discount_type === 'pwd') discPct = pwdPct / 100;
-  const discount_amount = Math.round(total_before_discount * discPct * 100) / 100;
+  // CHANGED: SC/PWD are now a FIXED PESO AMOUNT off the line, not a
+  // percentage. scPct/pwdPct now hold peso amounts (names kept as-is to
+  // avoid touching every call site). Clamp so the discount never exceeds
+  // the line's own total. A manual/custom discount (discount_type is
+  // neither 'sc' nor 'pwd') still uses the percentage-based discount_pct.
+  let discount_amount: number;
+  if (item.discount_type === 'sc') {
+    discount_amount = Math.min(scPct, total_before_discount);
+  } else if (item.discount_type === 'pwd') {
+    discount_amount = Math.min(pwdPct, total_before_discount);
+  } else {
+    const discPct = item.discount_pct / 100;
+    discount_amount = Math.round(total_before_discount * discPct * 100) / 100;
+  }
+  discount_amount = Math.round(discount_amount * 100) / 100;
   const line_subtotal = total_before_discount;
   const line_total = Math.round((total_before_discount - discount_amount) * 100) / 100;
-  // Store the effective percentage actually applied so the receipt and
-  // audit trail reflect the real discount rate, not the raw input (0 for SC/PWD).
-  const effective_discount_pct =
-    item.discount_type === 'sc'  ? scPct  :
-    item.discount_type === 'pwd' ? pwdPct :
-    item.discount_pct;
+  // NEW: for SC/PWD, discount_pct now just mirrors the raw input (0) since
+  // the applied discount is a flat amount, not a rate — discount_amount is
+  // the source of truth for what was actually taken off.
+  const effective_discount_pct = item.discount_pct;
   return { ...item, addons_total, line_subtotal, discount_amount, line_total, discount_pct: effective_discount_pct };
 }
 
@@ -202,6 +211,9 @@ export const useCartStore = create<CartStore>()((set, get) => ({
     note: '',
     idempotency_key: crypto.randomUUID(),
   },
+  // NOTE: despite the name, these now hold a fixed PESO amount (not a
+  // percent) for SC/PWD discounts. Kept the field names to avoid touching
+  // every call site — see computeItemTotals() above for the actual logic.
   scPct: 20,
   pwdPct: 20,
 

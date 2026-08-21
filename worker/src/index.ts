@@ -1031,8 +1031,11 @@ app.post('/api/sales', async (c) => {
   const settings = await db.select().from(systemSettings).where(
     or(eq(systemSettings.key, 'sc_discount_pct'), eq(systemSettings.key, 'pwd_discount_pct'))
   )
-  const scPct = parseFloat(settings.find(s => s.key === 'sc_discount_pct')?.value ?? '20') / 100
-  const pwdPct = parseFloat(settings.find(s => s.key === 'pwd_discount_pct')?.value ?? '20') / 100
+  // CHANGED: sc_discount_pct / pwd_discount_pct settings now hold a FIXED
+  // PESO AMOUNT off each qualifying line item, not a percentage. Setting
+  // keys kept as-is to avoid a DB migration — only the meaning changed.
+  const scAmt = parseFloat(settings.find(s => s.key === 'sc_discount_pct')?.value ?? '20')
+  const pwdAmt = parseFloat(settings.find(s => s.key === 'pwd_discount_pct')?.value ?? '20')
 
   const saleItemRows: typeof saleItems.$inferInsert[] = []
   const addonRows: typeof saleItemAddons.$inferInsert[] = []
@@ -1040,11 +1043,11 @@ app.post('/api/sales', async (c) => {
   for (const item of body.items) {
     const addonsTotal = item.addons.reduce((s, a) => s + a.addon_price * a.qty, 0)
     const itemBase = (item.base_price + addonsTotal) * item.qty
-    let discPct = 0
-    if (item.discount_type === 'sc') discPct = scPct
-    else if (item.discount_type === 'pwd') discPct = pwdPct
-    else if (item.discount_pct > 0) discPct = item.discount_pct / 100
-    const discAmt = Math.round(itemBase * discPct * 100) / 100
+    let discAmt = 0
+    if (item.discount_type === 'sc') discAmt = Math.min(scAmt, itemBase)
+    else if (item.discount_type === 'pwd') discAmt = Math.min(pwdAmt, itemBase)
+    else if (item.discount_pct > 0) discAmt = itemBase * (item.discount_pct / 100)
+    discAmt = Math.round(discAmt * 100) / 100
     const finalPrice = Math.round((itemBase - discAmt) * 100) / 100
     subtotal += finalPrice + discAmt
     discount_total += discAmt
@@ -1059,7 +1062,10 @@ app.post('/api/sales', async (c) => {
       base_price: item.base_price,
       qty: item.qty,
       discount_type: item.discount_type,
-      discount_pct: discPct * 100,
+      // NEW: SC/PWD no longer have a meaningful "rate" — store 0 and rely
+      // on discount_amount (the flat peso amount actually applied) as the
+      // source of truth. Manual/custom % discounts still store their rate.
+      discount_pct: item.discount_type === 'sc' || item.discount_type === 'pwd' ? 0 : item.discount_pct,
       discount_amount: discAmt,
       addons_total: addonsTotal * item.qty,
       final_price: finalPrice,

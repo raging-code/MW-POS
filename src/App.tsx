@@ -338,7 +338,7 @@ function formatAuditEntry(log: AuditLog): { title: string; detail: string | null
       closing_cash: 'Closing Cash', starting_float: 'Starting Float', variance: 'Variance',
       notes: 'Notes', name: 'Name', role: 'Role', amount: 'Amount', reason: 'Reason',
       store_name: 'Store Name', store_address: 'Address', receipt_footer: 'Receipt Footer',
-      sc_discount_pct: 'SC Discount %', pwd_discount_pct: 'PWD Discount %', total: 'Total',
+      sc_discount_pct: 'SC Discount (₱)', pwd_discount_pct: 'PWD Discount (₱)', total: 'Total',
       status: 'Status', qty: 'Qty', type: 'Type',
       actioned_by: 'Actioned By',
     };
@@ -3231,8 +3231,8 @@ function AdminSettingsPage() {
     { key: 'store_address',    label: 'Store Address' },
     { key: 'store_contact',    label: 'Contact Number' },
     { key: 'receipt_footer',   label: 'Receipt Footer Message' },
-    { key: 'sc_discount_pct',  label: 'Senior Citizen Discount %', type: 'number', hint: 'Default: 20%' },
-    { key: 'pwd_discount_pct', label: 'PWD Discount %',            type: 'number', hint: 'Default: 20%' },
+    { key: 'sc_discount_pct',  label: 'Senior Citizen Discount (₱)', type: 'number', hint: 'Fixed amount off per item, e.g. 20' },
+    { key: 'pwd_discount_pct', label: 'PWD Discount (₱)',            type: 'number', hint: 'Fixed amount off per item, e.g. 20' },
   ];
 
   return (
