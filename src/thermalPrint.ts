@@ -52,11 +52,9 @@ const BOLD_ON:       number[] = [ESC, 0x45, 0x01];
 const BOLD_OFF:      number[] = [ESC, 0x45, 0x00];
 const DOUBLE_HEIGHT: number[] = [ESC, 0x21, 0x10];
 const NORMAL_SIZE:   number[] = [ESC, 0x21, 0x00];
-// NEW: Font A (12 dots/char, ~32 cols on 58mm/384-dot paper) is the
-// printer's default. Font B (9 dots/char, ~42 cols) is smaller and gives
-// enough room for item name + price to fit on one line without wrapping.
-const FONT_A:        number[] = [ESC, 0x4d, 0x00];
-const FONT_B:        number[] = [ESC, 0x4d, 0x01];
+// REVERTED: ESC M (Font A/B select) isn't supported on this GOOJPRT
+// PT-210 unit — sending it stopped the printer from printing anything
+// past the header. Back to the printer's default font only.
 const CUT:           number[] = [GS, 0x56, 0x00];   // full cut
 const LF:            number[] = [0x0a];
  
@@ -201,13 +199,12 @@ function delayMs(ms: number): Promise<void> {
  
 // ─── ESC/POS receipt builder ──────────────────────────────────────────────────
 function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): Uint8Array {
-  // CHANGED: was 32/48 cols assuming the printer's default Font A
-  // (12 dots/char on a 384-dot 58mm head). That left too little room for
-  // "item name + price" on one line, causing the printer to word-wrap the
-  // price onto the next line where it visually overlapped the row below.
-  // Font B is 9 dots/char, giving ~42 cols on 58mm (384/9) and ~64 on
-  // 80mm — both comfortably fit every line on one row, and print smaller.
-  const cols = width === 80 ? 64 : 42;
+  // REVERTED to the printer's default font (Font B isn't supported on
+  // this unit). At 12 dots/char on a 384-dot 58mm head, 384/12 = 32 cols
+  // is correct and fits every line — the original wrapping/overlap was
+  // actually caused by the "₱" character being miscounted (see fmtMoney
+  // below), not by the column count itself.
+  const cols = width === 80 ? 48 : 32;
  
   // CHANGED: the real "₱" Unicode character prints as a blank box on
   // thermal printers — they use a single-byte code page (not UTF-8) with
@@ -233,10 +230,6 @@ function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): 
   p(cmd(ALIGN_CENTER), cmd(BOLD_ON), cmd(DOUBLE_HEIGHT));
   p(line(settings.store_name || 'Mango Warrior'));
   p(cmd(NORMAL_SIZE), cmd(BOLD_OFF));
-  // NEW: everything from here on (address, items, totals, footer) prints
-  // in the smaller Font B so full lines fit without wrapping. The store
-  // name above stays in the printer's normal/default font for emphasis.
-  p(cmd(FONT_B));
   if (settings.store_address) {
     for (const wline of wordWrap(settings.store_address, cols)) p(line(wline));
   }
