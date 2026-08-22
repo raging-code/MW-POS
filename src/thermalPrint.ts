@@ -229,7 +229,16 @@ function buildReceipt(sale: SaleDetail, settings: Settings, width: PaperWidth): 
   p(cmd(INIT));
   p(cmd(ALIGN_CENTER), cmd(BOLD_ON), cmd(DOUBLE_HEIGHT));
   p(line(settings.store_name || 'Mango Warrior'));
-  p(cmd(NORMAL_SIZE), cmd(BOLD_OFF));
+  // FIX 11: ESC ! 0x00 (NORMAL_SIZE) is a mode-SELECT byte, not additive —
+  // on cheap GOOJPRT/clone firmware, transitioning directly out of
+  // DOUBLE_HEIGHT via ESC ! desyncs the printer's internal state machine.
+  // The header still prints (it was already in flight), but everything
+  // after silently stops putting down ink even though paper keeps
+  // feeding — exactly "header prints, rest is blank, correct length".
+  // A full INIT (ESC @) is a hard reset every clone respects unambiguously,
+  // so use that instead of relying on ESC ! to cancel double-height/bold.
+  p(cmd(INIT));
+  p(cmd(BOLD_OFF));
   if (settings.store_address) {
     for (const wline of wordWrap(settings.store_address, cols)) p(line(wline));
   }
