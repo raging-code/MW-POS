@@ -259,6 +259,7 @@ console.log('\n[3/3] Frontend UI: src/App.tsx')
     requireAnchor(content, closeAnchor, 'src/App.tsx (AdminSettingsPage closing structure)')
 
     const dangerZoneAndModals = `              </div>
+            </div>
 
             <div className="mt-5 bg-white border border-red-200 rounded-2xl shadow-sm overflow-hidden">
               <div className="px-5 py-3 border-b border-red-100 flex items-center gap-2 bg-red-50">
