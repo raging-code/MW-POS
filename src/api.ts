@@ -399,6 +399,19 @@ export function useSoftDeleteSale() {
   })
 }
 
+export function usePurgeAllSales() {
+  const api = useApi()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { reason: string }) =>
+      api.post<{ ok: boolean; sales_deleted: number; shifts_deleted: number }>('/sales/purge-all', body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sales'] })
+      qc.invalidateQueries({ queryKey: ['shifts'] })
+    },
+  })
+}
+
 export function useReprintSale() {
   const api = useApi()
   const qc = useQueryClient()

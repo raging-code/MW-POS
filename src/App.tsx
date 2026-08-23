@@ -25,7 +25,7 @@ import {
   useOpenShift, useCloseShift, useCashDrop, useHeldOrders,
   useCreateHeldOrder, useDeleteHeldOrder, useCheckout, useSales,
   useSaleDetail, useVoidSale, useRefundSale, useSoftDeleteSale,
-  useReprintSale, useSalesReport, useSettings, useUpdateSettings,
+  useReprintSale, useSalesReport, useSettings, useUpdateSettings, usePurgeAllSales,
   useUsers, useCreateUser, useUpdateUser, useDeleteUser, useResetPin,
   useAuditLogs, useToggleAvailability, useCreateMenuItem,
   useUpdateMenuItem, useDeleteMenuItem, useCreateCategory, useUpdateCategory,
@@ -3234,6 +3234,29 @@ function AdminSettingsPage() {
   const [dirty, setDirty] = useState(false);
   const [savedPrinter, setSavedPrinter] = useState(getSavedPrinter);
   const [printerLoading, setPrinterLoading] = useState(false);
+  const purgeAllSales = usePurgeAllSales();
+  const [purgeModal, setPurgeModal] = useState(false);
+  const [purgeReason, setPurgeReason] = useState('');
+  const [purgeConfirmText, setPurgeConfirmText] = useState('');
+  const [showAnyPinForPurge, setShowAnyPinForPurge] = useState(false);
+
+  const handlePurgeConfirm = useCallback(() => {
+    if (!purgeReason || purgeConfirmText !== 'DELETE ALL') return;
+    setPurgeModal(false);
+    setShowAnyPinForPurge(true);
+  }, [purgeReason, purgeConfirmText]);
+
+  const doPurge = useCallback(async () => {
+    setShowAnyPinForPurge(false);
+    try {
+      const res = await purgeAllSales.mutateAsync({ reason: purgeReason });
+      toast(`Deleted ${res.sales_deleted} sale(s) and ${res.shifts_deleted} shift(s)`);
+      setPurgeReason('');
+      setPurgeConfirmText('');
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : 'Failed to delete sales data', 'error');
+    }
+  }, [purgeAllSales, purgeReason]);
 
   useEffect(() => { if (settings) { setForm(settings); setDirty(false); } }, [settings]);
 
@@ -3356,10 +3379,65 @@ function AdminSettingsPage() {
                   </div>
                 )}
               </div>
+
+            <div className="mt-5 bg-white border border-red-200 rounded-2xl shadow-sm overflow-hidden">
+              <div className="px-5 py-3 border-b border-red-100 flex items-center gap-2 bg-red-50">
+                <AlertTriangle size={14} className="text-red-600" />
+                <span className="text-xs font-700 text-red-700 uppercase tracking-wide" style={{ fontWeight: 700 }}>
+                  Danger Zone
+                </span>
+              </div>
+              <div className="px-5 py-4">
+                <p className="text-xs text-gray-500 mb-3">
+                  Permanently deletes ALL sales, sale line items, payments, cash drops, and shifts
+                  from the database. This cannot be undone — back up your data first (Reports export)
+                  before continuing.
+                </p>
+                <Btn variant="danger" fullWidth onClick={() => setPurgeModal(true)}>
+                  <Trash2 size={14} /> Delete All Sales Data
+                </Btn>
+              </div>
             </div>
           </div>
         )}
       </div>
+
+      <Modal open={purgeModal} onClose={() => setPurgeModal(false)} title="⚠️ Delete All Sales Data">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-gray-600">
+            This permanently deletes every sale, sale item, payment, cash drop, and shift record.
+            Menu, users, inventory, and settings are not affected. Make sure you have already
+            backed up your sales data before continuing — this cannot be undone.
+          </p>
+          <Input label="Reason" value={purgeReason} onChange={setPurgeReason} autoFocus />
+          <Input
+            label="Type DELETE ALL to confirm"
+            value={purgeConfirmText}
+            onChange={setPurgeConfirmText}
+            placeholder="DELETE ALL"
+          />
+          <div className="flex gap-2">
+            <Btn variant="secondary" onClick={() => setPurgeModal(false)} className="flex-1">Cancel</Btn>
+            <Btn
+              variant="danger"
+              onClick={handlePurgeConfirm}
+              disabled={!purgeReason || purgeConfirmText !== 'DELETE ALL'}
+              className="flex-1"
+            >
+              Continue
+            </Btn>
+          </div>
+        </div>
+      </Modal>
+
+      <AnyUserPinModal
+        open={showAnyPinForPurge}
+        onClose={() => setShowAnyPinForPurge(false)}
+        onSuccess={doPurge}
+        title="🔒 Authorize Deletion"
+        description="Enter your PIN to permanently delete all sales data."
+        required_role="admin"
+      />
     </div>
   );
 }

@@ -1385,6 +1385,46 @@ app.delete('/api/sales/:id', async (c) => {
   return jsonOk({ ok: true })
 })
 
+// POST /api/sales/purge-all — HARD delete ALL sales data (admin only)
+// Wipes sales, sale_items, sale_item_addons, sale_payments, cash_drops,
+// and shifts. Resets receipt_counters so numbering restarts cleanly.
+// This is IRREVERSIBLE — the caller is expected to have already backed
+// up their own data (e.g. via /api/reports/sales-detailed export).
+// One audit_log row is written BEFORE the delete, recording who did
+// it, their reason, and the row counts removed — this is the only
+// record of the wipe left behind afterward.
+app.post('/api/sales/purge-all', async (c) => {
+  const actor = c.get('user')
+  if (actor.role !== 'admin') return jsonErr('Admin only', 403)
+  const db = c.get('db')
+  const d1 = c.env.DB
+  const body = await c.req.json<{ reason: string }>().catch(() => ({ reason: '' }))
+  if (!body.reason) return jsonErr('Reason required')
+
+  const salesRow = await d1.prepare('SELECT COUNT(*) AS n FROM sales').first<{ n: number }>()
+  const shiftsRow = await d1.prepare('SELECT COUNT(*) AS n FROM shifts').first<{ n: number }>()
+  const salesCount = salesRow?.n ?? 0
+  const shiftsCount = shiftsRow?.n ?? 0
+
+  // Log first: once the delete runs there's nothing left to reference.
+  await createAuditLog(db, actor.id, 'purge_all_sales', 'sale', null, null, {
+    sales_deleted: salesCount,
+    shifts_deleted: shiftsCount,
+  }, body.reason)
+
+  await d1.batch([
+    d1.prepare('DELETE FROM sale_item_addons'),
+    d1.prepare('DELETE FROM sale_items'),
+    d1.prepare('DELETE FROM sale_payments'),
+    d1.prepare('DELETE FROM sales'),
+    d1.prepare('DELETE FROM cash_drops'),
+    d1.prepare('DELETE FROM shifts'),
+    d1.prepare('DELETE FROM receipt_counters'),
+  ])
+
+  return jsonOk({ ok: true, sales_deleted: salesCount, shifts_deleted: shiftsCount })
+})
+
 // POST /api/sales/:id/reprint
 app.post('/api/sales/:id/reprint', async (c) => {
   const actor = c.get('user')
