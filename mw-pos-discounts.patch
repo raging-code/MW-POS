@@ -1,0 +1,197 @@
+diff --git a/src/App.tsx b/src/App.tsx
+index fa74308..a8ab559 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -77,6 +77,15 @@ function getCategoryColor(idx: number) {
+ 
+ // ─── Helpers ──────────────────────────────────────────────────
+ function fmt(amount: number) { return `₱${amount.toFixed(2)}`; }
++function discountLabel(type: string | null | undefined) {
++  switch (type) {
++    case 'sc': return 'SC';
++    case 'pwd': return 'PWD';
++    case 'p15': return '15%';
++    case 'p100': return '100%';
++    default: return '';
++  }
++}
+ function fmtDate(iso: string) {
+   try { return format(parseISO(iso), 'MMM d, yyyy h:mm a'); } catch { return iso; }
+ }
+@@ -720,7 +729,7 @@ const SaleReceipt = memo(function SaleReceipt({ sale, settings }: { sale: SaleDe
+           ))}
+           {item.discount_amount > 0 && (
+             <div className="flex justify-between pl-3 text-gray-400">
+-              <span>{item.discount_type?.toUpperCase()} Discount</span>
++              <span>{discountLabel(item.discount_type)} Discount</span>
+               <span>-{fmt(item.discount_amount)}</span>
+             </div>
+           )}
+@@ -1723,8 +1732,10 @@ const CartItemRow = memo(function CartItemRow({
+   const handleRemove    = useCallback(() => removeItem(item.cart_key), [removeItem, item.cart_key]);
+   const handleQtyMinus  = useCallback(() => updateQty(item.cart_key, -1), [updateQty, item.cart_key]);
+   const handleQtyPlus   = useCallback(() => updateQty(item.cart_key, 1),  [updateQty, item.cart_key]);
+-  const handleScToggle  = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'sc'  ? null : 'sc'),  [setDiscount, item.cart_key, item.discount_type]);
+-  const handlePwdToggle = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd'), [setDiscount, item.cart_key, item.discount_type]);
++  const handleScToggle   = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'sc'   ? null : 'sc'),   [setDiscount, item.cart_key, item.discount_type]);
++  const handlePwdToggle  = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'pwd'  ? null : 'pwd'),  [setDiscount, item.cart_key, item.discount_type]);
++  const handleP15Toggle  = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'p15'  ? null : 'p15'),  [setDiscount, item.cart_key, item.discount_type]);
++  const handleP100Toggle = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'p100' ? null : 'p100'), [setDiscount, item.cart_key, item.discount_type]);
+   const handleAddonTap  = useCallback(() => onOpenAddonPicker(item.cart_key, item.addons, item.category_id), [onOpenAddonPicker, item.cart_key, item.addons, item.category_id]);
+  
+   return (
+@@ -1809,6 +1820,18 @@ const CartItemRow = memo(function CartItemRow({
+               className={`discount-btn discount-btn-pwd ${item.discount_type === 'pwd' ? 'active' : ''}`}>
+               PWD
+             </button>
++            <button
++              onClick={handleP15Toggle}
++              aria-pressed={item.discount_type === 'p15'}
++              className={`discount-btn discount-btn-p15 ${item.discount_type === 'p15' ? 'active' : ''}`}>
++              15%
++            </button>
++            <button
++              onClick={handleP100Toggle}
++              aria-pressed={item.discount_type === 'p100'}
++              className={`discount-btn discount-btn-p100 ${item.discount_type === 'p100' ? 'active' : ''}`}>
++              100%
++            </button>
+           </>
+         )}
+         {item.discount_type && (
+@@ -2940,7 +2963,7 @@ function SalesPage() {
+                     ))}
+                     {item.discount_amount > 0 && (
+                       <div className="flex justify-between text-xs text-emerald-600 pl-3 font-semibold">
+-                        <span>{item.discount_type?.toUpperCase()} discount</span>
++                        <span>{discountLabel(item.discount_type)} discount</span>
+                         <span>−{fmt(item.discount_amount)}</span>
+                       </div>
+                     )}
+diff --git a/src/index.css b/src/index.css
+index a72b9b2..6dcd3d4 100644
+--- a/src/index.css
++++ b/src/index.css
+@@ -520,6 +520,10 @@ body {
+ .discount-btn-sc.active { background: #2563EB; color: #fff; border-color: #2563EB; }
+ .discount-btn-pwd { background: #F5F3FF; color: #6D28D9; border-color: #DDD6FE; }
+ .discount-btn-pwd.active { background: #7C3AED; color: #fff; border-color: #7C3AED; }
++.discount-btn-p15  { background: #FFF7ED; color: #C2410C; border-color: #FED7AA; }
++.discount-btn-p15.active { background: #EA580C; color: #fff; border-color: #EA580C; }
++.discount-btn-p100 { background: #FEF2F2; color: #B91C1C; border-color: #FECACA; }
++.discount-btn-p100.active { background: #DC2626; color: #fff; border-color: #DC2626; }
+ 
+ /* ── Toast ── */
+ .toast-enter { animation: fadeUp 0.16s ease-out forwards; }
+diff --git a/src/store.ts b/src/store.ts
+index ac8b42d..7837ed6 100644
+--- a/src/store.ts
++++ b/src/store.ts
+@@ -164,6 +164,12 @@ function computeItemTotals(
+     discount_amount = Math.min(scPct, total_before_discount);
+   } else if (item.discount_type === 'pwd') {
+     discount_amount = Math.min(pwdPct, total_before_discount);
++  } else if (item.discount_type === 'p15') {
++    // Straight 15% off the line — a true percentage, unlike SC/PWD's flat peso amount.
++    discount_amount = Math.round(total_before_discount * 0.15 * 100) / 100;
++  } else if (item.discount_type === 'p100') {
++    // 100% off — comps the line entirely.
++    discount_amount = total_before_discount;
+   } else {
+     const discPct = item.discount_pct / 100;
+     discount_amount = Math.round(total_before_discount * discPct * 100) / 100;
+diff --git a/src/types.ts b/src/types.ts
+index f27e2d2..9de42c4 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -10,7 +10,7 @@ export type Page =
+   | 'admin_audit';
+ 
+ export type OrderType = 'dine_in' | 'take_out';
+-export type DiscountType = 'sc' | 'pwd' | null;
++export type DiscountType = 'sc' | 'pwd' | 'p15' | 'p100' | null;
+ export type PaymentMethod = 'cash' | 'gcash' | 'maya';
+ 
+ // ─── Auth ─────────────────────────────────────────────────────
+diff --git a/worker/migrations/0005_discount_type_p15_p100.sql b/worker/migrations/0005_discount_type_p15_p100.sql
+new file mode 100644
+index 0000000..f53e76d
+--- /dev/null
++++ b/worker/migrations/0005_discount_type_p15_p100.sql
+@@ -0,0 +1,36 @@
++-- Widen sale_items.discount_type CHECK constraint to allow the new
++-- 15% and 100% discount types ('p15', 'p100') alongside 'sc'/'pwd'.
++-- SQLite can't ALTER a CHECK constraint directly, so we rebuild the
++-- table (standard 12-step pattern) and restore its index.
++
++PRAGMA foreign_keys=OFF;
++
++CREATE TABLE sale_items_new (
++  id TEXT PRIMARY KEY,
++  sale_id TEXT NOT NULL REFERENCES sales(id),
++  item_id_ref TEXT,
++  item_name TEXT NOT NULL,
++  size_name TEXT,
++  base_price REAL NOT NULL,
++  qty INTEGER NOT NULL DEFAULT 1,
++  discount_type TEXT CHECK(discount_type IN ('sc','pwd','p15','p100')),
++  discount_pct REAL NOT NULL DEFAULT 0,
++  discount_amount REAL NOT NULL DEFAULT 0,
++  addons_total REAL NOT NULL DEFAULT 0,
++  final_price REAL NOT NULL
++);
++
++INSERT INTO sale_items_new
++  (id, sale_id, item_id_ref, item_name, size_name, base_price, qty,
++   discount_type, discount_pct, discount_amount, addons_total, final_price)
++SELECT
++  id, sale_id, item_id_ref, item_name, size_name, base_price, qty,
++  discount_type, discount_pct, discount_amount, addons_total, final_price
++FROM sale_items;
++
++DROP TABLE sale_items;
++ALTER TABLE sale_items_new RENAME TO sale_items;
++
++CREATE INDEX IF NOT EXISTS idx_sale_items_sale ON sale_items(sale_id);
++
++PRAGMA foreign_keys=ON;
+diff --git a/worker/src/index.ts b/worker/src/index.ts
+index 26e906b..8cb00de 100644
+--- a/worker/src/index.ts
++++ b/worker/src/index.ts
+@@ -162,7 +162,7 @@ const saleItems = sqliteTable('sale_items', {
+   size_name:       text('size_name'),
+   base_price:      real('base_price').notNull(),
+   qty:             integer('qty').notNull().default(1),
+-  discount_type:   text('discount_type', { enum: ['sc', 'pwd'] }),
++  discount_type:   text('discount_type', { enum: ['sc', 'pwd', 'p15', 'p100'] }),
+   discount_pct:    real('discount_pct').notNull().default(0),
+   discount_amount: real('discount_amount').notNull().default(0),
+   addons_total:    real('addons_total').notNull().default(0),
+@@ -989,7 +989,7 @@ type CheckoutItem = {
+   size_name?: string
+   base_price: number
+   qty: number
+-  discount_type?: 'sc' | 'pwd'
++  discount_type?: 'sc' | 'pwd' | 'p15' | 'p100'
+   discount_pct: number
+   addons: { addon_id: string; addon_name: string; addon_price: number; qty: number }[]
+ }
+@@ -1064,6 +1064,8 @@ app.post('/api/sales', async (c) => {
+       discAmt = 0
+     } else if (item.discount_type === 'sc') discAmt = Math.min(scAmt, itemBase)
+     else if (item.discount_type === 'pwd') discAmt = Math.min(pwdAmt, itemBase)
++    else if (item.discount_type === 'p15') discAmt = itemBase * 0.15
++    else if (item.discount_type === 'p100') discAmt = itemBase
+     else if (item.discount_pct > 0) discAmt = itemBase * (item.discount_pct / 100)
+     discAmt = Math.round(discAmt * 100) / 100
+     const finalPrice = Math.round((itemBase - discAmt) * 100) / 100
+@@ -1083,7 +1085,7 @@ app.post('/api/sales', async (c) => {
+       // NEW: SC/PWD no longer have a meaningful "rate" — store 0 and rely
+       // on discount_amount (the flat peso amount actually applied) as the
+       // source of truth. Manual/custom % discounts still store their rate.
+-      discount_pct: item.discount_type === 'sc' || item.discount_type === 'pwd' ? 0 : item.discount_pct,
++      discount_pct: (item.discount_type === 'sc' || item.discount_type === 'pwd' || item.discount_type === 'p15' || item.discount_type === 'p100') ? 0 : item.discount_pct,
+       discount_amount: discAmt,
+       addons_total: addonsTotal * item.qty,
+       final_price: finalPrice,

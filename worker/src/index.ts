@@ -162,7 +162,7 @@ const saleItems = sqliteTable('sale_items', {
   size_name:       text('size_name'),
   base_price:      real('base_price').notNull(),
   qty:             integer('qty').notNull().default(1),
-  discount_type:   text('discount_type', { enum: ['sc', 'pwd'] }),
+  discount_type:   text('discount_type', { enum: ['sc', 'pwd', 'p15', 'p100'] }),
   discount_pct:    real('discount_pct').notNull().default(0),
   discount_amount: real('discount_amount').notNull().default(0),
   addons_total:    real('addons_total').notNull().default(0),
@@ -989,7 +989,7 @@ type CheckoutItem = {
   size_name?: string
   base_price: number
   qty: number
-  discount_type?: 'sc' | 'pwd'
+  discount_type?: 'sc' | 'pwd' | 'p15' | 'p100'
   discount_pct: number
   addons: { addon_id: string; addon_name: string; addon_price: number; qty: number }[]
 }
@@ -1064,6 +1064,8 @@ app.post('/api/sales', async (c) => {
       discAmt = 0
     } else if (item.discount_type === 'sc') discAmt = Math.min(scAmt, itemBase)
     else if (item.discount_type === 'pwd') discAmt = Math.min(pwdAmt, itemBase)
+    else if (item.discount_type === 'p15') discAmt = itemBase * 0.15
+    else if (item.discount_type === 'p100') discAmt = itemBase
     else if (item.discount_pct > 0) discAmt = itemBase * (item.discount_pct / 100)
     discAmt = Math.round(discAmt * 100) / 100
     const finalPrice = Math.round((itemBase - discAmt) * 100) / 100
@@ -1083,7 +1085,7 @@ app.post('/api/sales', async (c) => {
       // NEW: SC/PWD no longer have a meaningful "rate" — store 0 and rely
       // on discount_amount (the flat peso amount actually applied) as the
       // source of truth. Manual/custom % discounts still store their rate.
-      discount_pct: item.discount_type === 'sc' || item.discount_type === 'pwd' ? 0 : item.discount_pct,
+      discount_pct: (item.discount_type === 'sc' || item.discount_type === 'pwd' || item.discount_type === 'p15' || item.discount_type === 'p100') ? 0 : item.discount_pct,
       discount_amount: discAmt,
       addons_total: addonsTotal * item.qty,
       final_price: finalPrice,

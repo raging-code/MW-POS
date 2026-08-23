@@ -77,6 +77,15 @@ function getCategoryColor(idx: number) {
 
 // ─── Helpers ──────────────────────────────────────────────────
 function fmt(amount: number) { return `₱${amount.toFixed(2)}`; }
+function discountLabel(type: string | null | undefined) {
+  switch (type) {
+    case 'sc': return 'SC';
+    case 'pwd': return 'PWD';
+    case 'p15': return '15%';
+    case 'p100': return '100%';
+    default: return '';
+  }
+}
 function fmtDate(iso: string) {
   try { return format(parseISO(iso), 'MMM d, yyyy h:mm a'); } catch { return iso; }
 }
@@ -720,7 +729,7 @@ const SaleReceipt = memo(function SaleReceipt({ sale, settings }: { sale: SaleDe
           ))}
           {item.discount_amount > 0 && (
             <div className="flex justify-between pl-3 text-gray-400">
-              <span>{item.discount_type?.toUpperCase()} Discount</span>
+              <span>{discountLabel(item.discount_type)} Discount</span>
               <span>-{fmt(item.discount_amount)}</span>
             </div>
           )}
@@ -1723,8 +1732,10 @@ const CartItemRow = memo(function CartItemRow({
   const handleRemove    = useCallback(() => removeItem(item.cart_key), [removeItem, item.cart_key]);
   const handleQtyMinus  = useCallback(() => updateQty(item.cart_key, -1), [updateQty, item.cart_key]);
   const handleQtyPlus   = useCallback(() => updateQty(item.cart_key, 1),  [updateQty, item.cart_key]);
-  const handleScToggle  = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'sc'  ? null : 'sc'),  [setDiscount, item.cart_key, item.discount_type]);
-  const handlePwdToggle = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'pwd' ? null : 'pwd'), [setDiscount, item.cart_key, item.discount_type]);
+  const handleScToggle   = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'sc'   ? null : 'sc'),   [setDiscount, item.cart_key, item.discount_type]);
+  const handlePwdToggle  = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'pwd'  ? null : 'pwd'),  [setDiscount, item.cart_key, item.discount_type]);
+  const handleP15Toggle  = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'p15'  ? null : 'p15'),  [setDiscount, item.cart_key, item.discount_type]);
+  const handleP100Toggle = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'p100' ? null : 'p100'), [setDiscount, item.cart_key, item.discount_type]);
   const handleAddonTap  = useCallback(() => onOpenAddonPicker(item.cart_key, item.addons, item.category_id), [onOpenAddonPicker, item.cart_key, item.addons, item.category_id]);
  
   return (
@@ -1808,6 +1819,18 @@ const CartItemRow = memo(function CartItemRow({
               aria-pressed={item.discount_type === 'pwd'}
               className={`discount-btn discount-btn-pwd ${item.discount_type === 'pwd' ? 'active' : ''}`}>
               PWD
+            </button>
+            <button
+              onClick={handleP15Toggle}
+              aria-pressed={item.discount_type === 'p15'}
+              className={`discount-btn discount-btn-p15 ${item.discount_type === 'p15' ? 'active' : ''}`}>
+              15%
+            </button>
+            <button
+              onClick={handleP100Toggle}
+              aria-pressed={item.discount_type === 'p100'}
+              className={`discount-btn discount-btn-p100 ${item.discount_type === 'p100' ? 'active' : ''}`}>
+              100%
             </button>
           </>
         )}
@@ -2940,7 +2963,7 @@ function SalesPage() {
                     ))}
                     {item.discount_amount > 0 && (
                       <div className="flex justify-between text-xs text-emerald-600 pl-3 font-semibold">
-                        <span>{item.discount_type?.toUpperCase()} discount</span>
+                        <span>{discountLabel(item.discount_type)} discount</span>
                         <span>−{fmt(item.discount_amount)}</span>
                       </div>
                     )}

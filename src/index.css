@@ -520,6 +520,10 @@ body {
 .discount-btn-sc.active { background: #2563EB; color: #fff; border-color: #2563EB; }
 .discount-btn-pwd { background: #F5F3FF; color: #6D28D9; border-color: #DDD6FE; }
 .discount-btn-pwd.active { background: #7C3AED; color: #fff; border-color: #7C3AED; }
+.discount-btn-p15  { background: #FFF7ED; color: #C2410C; border-color: #FED7AA; }
+.discount-btn-p15.active { background: #EA580C; color: #fff; border-color: #EA580C; }
+.discount-btn-p100 { background: #FEF2F2; color: #B91C1C; border-color: #FECACA; }
+.discount-btn-p100.active { background: #DC2626; color: #fff; border-color: #DC2626; }
 
 /* ── Toast ── */
 .toast-enter { animation: fadeUp 0.16s ease-out forwards; }

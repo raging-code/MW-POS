@@ -164,6 +164,12 @@ function computeItemTotals(
     discount_amount = Math.min(scPct, total_before_discount);
   } else if (item.discount_type === 'pwd') {
     discount_amount = Math.min(pwdPct, total_before_discount);
+  } else if (item.discount_type === 'p15') {
+    // Straight 15% off the line — a true percentage, unlike SC/PWD's flat peso amount.
+    discount_amount = Math.round(total_before_discount * 0.15 * 100) / 100;
+  } else if (item.discount_type === 'p100') {
+    // 100% off — comps the line entirely.
+    discount_amount = total_before_discount;
   } else {
     const discPct = item.discount_pct / 100;
     discount_amount = Math.round(total_before_discount * discPct * 100) / 100;
