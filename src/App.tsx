@@ -1908,12 +1908,12 @@ const CartItemRow = memo(function CartItemRow({
 // ─── Discount Picker Modal — single entry point listing every ──
 // available discount type for a cart line, opened from the one
 // "Discount" button on CartItemRow.
-const DISCOUNT_OPTIONS: { type: Exclude<CartItem['discount_type'], null>; label: string; hint: string; className: string }[] = [
-  { type: 'sc',   label: 'Senior Citizen (SC)', hint: 'Fixed peso amount off the line', className: 'discount-btn-sc' },
-  { type: 'pwd',  label: 'PWD',                 hint: 'Fixed peso amount off the line', className: 'discount-btn-pwd' },
-  { type: 'p15',  label: '15% Off',             hint: '15% off this line',              className: 'discount-btn-p15' },
-  { type: 'p100', label: '100% Off',            hint: 'Comps this line entirely',        className: 'discount-btn-p100' },
-  { type: 'p10',  label: '-₱10 Discount',       hint: '₱10 off this line',              className: 'discount-btn-p10' },
+const DISCOUNT_OPTIONS: { type: Exclude<CartItem['discount_type'], null>; label: string; className: string }[] = [
+  { type: 'sc',   label: 'Senior Citizen (SC)', className: 'discount-btn-sc' },
+  { type: 'pwd',  label: 'PWD',                 className: 'discount-btn-pwd' },
+  { type: 'p15',  label: '15% Off',             className: 'discount-btn-p15' },
+  { type: 'p100', label: '100% Off',            className: 'discount-btn-p100' },
+  { type: 'p10',  label: '-₱10 Discount',       className: 'discount-btn-p10' },
 ];
 
 function DiscountPickerModal({
@@ -1938,10 +1938,9 @@ function DiscountPickerModal({
                 isActive ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 bg-white hover:border-gray-300'
               )}>
               <div className="min-w-0">
-                <div className={`discount-btn ${opt.className} ${isActive ? 'active' : ''}`} style={{ display: 'inline-block', marginBottom: 4 }}>
+                <div className={`discount-btn ${opt.className} ${isActive ? 'active' : ''}`} style={{ display: 'inline-block' }}>
                   {opt.label}
                 </div>
-                <div className="text-xs text-gray-400">{opt.hint}</div>
               </div>
               {isActive && <span className="text-emerald-600 font-700 text-xs shrink-0">Applied ✓</span>}
             </button>
