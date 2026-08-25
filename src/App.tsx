@@ -1270,6 +1270,18 @@ function POSPage() {
     currentAddons: CartAddon[];
     categoryId: string | null;
   } | null>(null);
+  // Discount picker modal must be rendered here (POSPage), NOT inside
+  // CartItemRow — CartItemRow lives inside the cart list's `.scrollable`
+  // container, which has `transform: translateZ(0)` for scroll perf. Any
+  // ancestor with a `transform` becomes a new containing block for
+  // `position: fixed` descendants, so a modal mounted inside it gets
+  // clipped/mispositioned to that container instead of covering the
+  // viewport. Same reason CartAddonPickerModal lives here instead of in
+  // CartItemRow (see the FIX comment near addonPickerFor above).
+  const [discountPickerFor, setDiscountPickerFor] = useState<{
+    cartKey: string;
+    activeType: CartItem['discount_type'];
+  } | null>(null);
 
   // FIX: Local note state + debounce to prevent full POSPage re-render on every keystroke.
   // cart.setNote() triggers a Zustand set() which re-renders POSPage (full store subscriber)
@@ -1310,6 +1322,18 @@ function POSPage() {
   const handleOpenAddonPicker = useCallback((cartKey: string, currentAddons: CartAddon[], categoryId: string | null) => {
     setAddonPickerFor({ cartKey, currentAddons, categoryId });
   }, []);
+
+  const handleOpenDiscountPicker = useCallback((cartKey: string, activeType: CartItem['discount_type']) => {
+    setDiscountPickerFor({ cartKey, activeType });
+  }, []);
+  const setDiscountAction = useCartStore(s => s.setDiscount);
+  const handleSelectDiscount = useCallback((type: Exclude<CartItem['discount_type'], null>) => {
+    setDiscountPickerFor(prev => {
+      if (!prev) return prev;
+      setDiscountAction(prev.cartKey, prev.activeType === type ? null : type);
+      return null;
+    });
+  }, [setDiscountAction]);
 
   useEffect(() => {
     if (settings) {
@@ -1586,6 +1610,7 @@ function POSPage() {
     allAddons={allAddons}
     discountDisabled={categories.find((c: Category) => c.id === item.category_id)?.discount_disabled ?? false}
     onOpenAddonPicker={handleOpenAddonPicker}
+    onOpenDiscountPicker={handleOpenDiscountPicker}
   />
                 ))}
               </div>
@@ -1737,6 +1762,13 @@ function POSPage() {
       onClose={() => setAddonPickerFor(null)}
     />
   )}
+      {discountPickerFor && (
+        <DiscountPickerModal
+          activeType={discountPickerFor.activeType}
+          onSelect={handleSelectDiscount}
+          onClose={() => setDiscountPickerFor(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1747,11 +1779,13 @@ const CartItemRow = memo(function CartItemRow({
   allAddons,
   discountDisabled,
   onOpenAddonPicker,
+  onOpenDiscountPicker,
 }: {
   item: CartItem;
   allAddons: Addon[];
   discountDisabled?: boolean;
   onOpenAddonPicker: (cartKey: string, currentAddons: CartAddon[], categoryId: string | null) => void;
+  onOpenDiscountPicker: (cartKey: string, activeType: CartItem['discount_type']) => void;
 }) {
   // FIX: Select only the three action functions from the cart store.
   // CartItemRow is memo'd and never reads cart STATE — it only calls actions.
@@ -1762,7 +1796,6 @@ const CartItemRow = memo(function CartItemRow({
   // selector never triggers a re-render on its own.
   const removeItem   = useCartStore(s => s.removeItem);
   const updateQty    = useCartStore(s => s.updateQty);
-  const setDiscount  = useCartStore(s => s.setDiscount);
 
   // FIX C: accentColors moved to module-level CART_ACCENT_COLORS constant
   // (no longer allocated on every render). useMemo dependency is now stable.
@@ -1774,15 +1807,10 @@ const CartItemRow = memo(function CartItemRow({
   const handleRemove    = useCallback(() => removeItem(item.cart_key), [removeItem, item.cart_key]);
   const handleQtyMinus  = useCallback(() => updateQty(item.cart_key, -1), [updateQty, item.cart_key]);
   const handleQtyPlus   = useCallback(() => updateQty(item.cart_key, 1),  [updateQty, item.cart_key]);
-  const [showDiscountModal, setShowDiscountModal] = useState(false);
-  const handleOpenDiscountModal  = useCallback(() => setShowDiscountModal(true),  []);
-  const handleCloseDiscountModal = useCallback(() => setShowDiscountModal(false), []);
-  const handleSelectDiscount = useCallback((type: Exclude<CartItem['discount_type'], null>) => {
-    // Selecting the currently-active discount again clears it (toggle behavior,
-    // same as the old individual buttons).
-    setDiscount(item.cart_key, item.discount_type === type ? null : type);
-    setShowDiscountModal(false);
-  }, [setDiscount, item.cart_key, item.discount_type]);
+  const handleOpenDiscountModal = useCallback(
+    () => onOpenDiscountPicker(item.cart_key, item.discount_type),
+    [onOpenDiscountPicker, item.cart_key, item.discount_type]
+  );
   const handleAddonTap  = useCallback(() => onOpenAddonPicker(item.cart_key, item.addons, item.category_id), [onOpenAddonPicker, item.cart_key, item.addons, item.category_id]);
  
   return (
@@ -1868,14 +1896,11 @@ const CartItemRow = memo(function CartItemRow({
           </span>
         )}
       </div>
-      {showDiscountModal && (
-        <DiscountPickerModal
-          activeType={item.discount_type}
-          onSelect={handleSelectDiscount}
-          onClose={handleCloseDiscountModal}
-        />
-      )}
-      {/* CartAddonPickerModal is NO LONGER rendered here — it's in POSPage */}
+      {/* DiscountPickerModal and CartAddonPickerModal are NOT rendered here —
+          both live in POSPage. CartItemRow sits inside the cart list's
+          `.scrollable` container (transform: translateZ(0) for scroll perf),
+          and a fixed-position modal mounted inside a transformed ancestor
+          gets contained/clipped to that ancestor instead of the viewport. */}
     </article>
   );
 });
