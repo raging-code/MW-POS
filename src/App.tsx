@@ -83,6 +83,7 @@ function discountLabel(type: string | null | undefined) {
     case 'pwd': return 'PWD';
     case 'p15': return '15%';
     case 'p100': return '100%';
+    case 'p10': return '-₱10';
     default: return '';
   }
 }
@@ -1110,6 +1111,32 @@ function CartAddonPickerModal({
     setSelected(prev => prev.map(a => a.addon_id === addonId ? { ...a, qty: Math.max(1, a.qty + delta) } : a));
   }, []);
 
+  // Loyalty card redemption: crew can mark a selected add-on as free. We
+  // don't track a separate "original price" field on CartAddon — instead we
+  // remember it locally in this modal (keyed by addon_id, sourced from the
+  // menu's Addon list) purely for display, and zero out addon_price itself
+  // when applying. That way addons_total, receipts, and checkout all just
+  // work with zero downstream changes: a loyalty-free add-on is, everywhere
+  // else in the app, an add-on that costs ₱0.
+  const loyaltyFree = useMemo(() => {
+    const s = new Set<string>();
+    currentAddons.forEach(a => { if (a.addon_price === 0) s.add(a.addon_id); });
+    return s;
+  }, [currentAddons]);
+  const [freeAddonIds, setFreeAddonIds] = useState<Set<string>>(loyaltyFree);
+
+  const toggleLoyaltyFree = useCallback((addon: Addon) => {
+    setFreeAddonIds(prev => {
+      const next = new Set(prev);
+      if (next.has(addon.id)) next.delete(addon.id); else next.add(addon.id);
+      return next;
+    });
+    setSelected(prev => prev.map(a => a.addon_id === addon.id
+      ? { ...a, addon_price: freeAddonIds.has(addon.id) ? addon.price : 0 }
+      : a
+    ));
+  }, [freeAddonIds]);
+
   const handleApply = useCallback(() => { setAddons(cartKey, selected); onClose(); }, [setAddons, cartKey, selected, onClose]);
   // FIX: previously only filtered by is_available, so an add-on assigned
   // to e.g. "Snacks" and "Rice Meals" would still show up for items in
@@ -1146,19 +1173,34 @@ function CartAddonPickerModal({
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-600 text-gray-900" style={{ fontWeight: 600 }}>{addon.name}</div>
-                    <div className="text-xs font-700 text-amber-700 mt-0.5">+{fmt(addon.price)} each</div>
+                    {sel && freeAddonIds.has(addon.id) ? (
+                      <div className="text-xs font-700 text-emerald-600 mt-0.5">FREE (loyalty)</div>
+                    ) : (
+                      <div className="text-xs font-700 text-amber-700 mt-0.5">+{fmt(addon.price)} each</div>
+                    )}
                   </div>
                   {sel && (
-                    <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
-                      <button onClick={() => changeQty(addon.id, -1)} aria-label="Decrease quantity"
-                        className="w-7 h-7 rounded-lg bg-white border border-gray-200 hover:bg-gray-100 flex items-center justify-center text-gray-600 shadow-sm transition-colors">
-                        <Minus size={10} />
-                      </button>
-                      <span className="w-5 text-center text-sm font-800 text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>{sel.qty}</span>
-                      <button onClick={() => changeQty(addon.id, 1)} aria-label="Increase quantity"
-                        className="w-7 h-7 rounded-lg bg-white border border-yellow-200 hover:bg-yellow-50 flex items-center justify-center text-amber-700 shadow-sm transition-colors">
-                        <Plus size={10} />
-                      </button>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={() => changeQty(addon.id, -1)} aria-label="Decrease quantity"
+                          className="w-7 h-7 rounded-lg bg-white border border-gray-200 hover:bg-gray-100 flex items-center justify-center text-gray-600 shadow-sm transition-colors">
+                          <Minus size={10} />
+                        </button>
+                        <span className="w-5 text-center text-sm font-800 text-gray-900" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>{sel.qty}</span>
+                        <button onClick={() => changeQty(addon.id, 1)} aria-label="Increase quantity"
+                          className="w-7 h-7 rounded-lg bg-white border border-yellow-200 hover:bg-yellow-50 flex items-center justify-center text-amber-700 shadow-sm transition-colors">
+                          <Plus size={10} />
+                        </button>
+                      </div>
+                      <label className="flex items-center gap-1 text-[10px] font-600 text-gray-500 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={freeAddonIds.has(addon.id)}
+                          onChange={() => toggleLoyaltyFree(addon)}
+                          className="w-3 h-3 accent-emerald-600"
+                        />
+                        🎁 Loyalty free
+                      </label>
                     </div>
                   )}
                 </div>
@@ -1732,10 +1774,15 @@ const CartItemRow = memo(function CartItemRow({
   const handleRemove    = useCallback(() => removeItem(item.cart_key), [removeItem, item.cart_key]);
   const handleQtyMinus  = useCallback(() => updateQty(item.cart_key, -1), [updateQty, item.cart_key]);
   const handleQtyPlus   = useCallback(() => updateQty(item.cart_key, 1),  [updateQty, item.cart_key]);
-  const handleScToggle   = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'sc'   ? null : 'sc'),   [setDiscount, item.cart_key, item.discount_type]);
-  const handlePwdToggle  = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'pwd'  ? null : 'pwd'),  [setDiscount, item.cart_key, item.discount_type]);
-  const handleP15Toggle  = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'p15'  ? null : 'p15'),  [setDiscount, item.cart_key, item.discount_type]);
-  const handleP100Toggle = useCallback(() => setDiscount(item.cart_key, item.discount_type === 'p100' ? null : 'p100'), [setDiscount, item.cart_key, item.discount_type]);
+  const [showDiscountModal, setShowDiscountModal] = useState(false);
+  const handleOpenDiscountModal  = useCallback(() => setShowDiscountModal(true),  []);
+  const handleCloseDiscountModal = useCallback(() => setShowDiscountModal(false), []);
+  const handleSelectDiscount = useCallback((type: Exclude<CartItem['discount_type'], null>) => {
+    // Selecting the currently-active discount again clears it (toggle behavior,
+    // same as the old individual buttons).
+    setDiscount(item.cart_key, item.discount_type === type ? null : type);
+    setShowDiscountModal(false);
+  }, [setDiscount, item.cart_key, item.discount_type]);
   const handleAddonTap  = useCallback(() => onOpenAddonPicker(item.cart_key, item.addons, item.category_id), [onOpenAddonPicker, item.cart_key, item.addons, item.category_id]);
  
   return (
@@ -1807,32 +1854,13 @@ const CartItemRow = memo(function CartItemRow({
         {discountDisabled ? (
           <span className="text-[11px] text-gray-400 italic">Not available for this category</span>
         ) : (
-          <>
-            <button
-              onClick={handleScToggle}
-              aria-pressed={item.discount_type === 'sc'}
-              className={`discount-btn discount-btn-sc ${item.discount_type === 'sc' ? 'active' : ''}`}>
-              SC
-            </button>
-            <button
-              onClick={handlePwdToggle}
-              aria-pressed={item.discount_type === 'pwd'}
-              className={`discount-btn discount-btn-pwd ${item.discount_type === 'pwd' ? 'active' : ''}`}>
-              PWD
-            </button>
-            <button
-              onClick={handleP15Toggle}
-              aria-pressed={item.discount_type === 'p15'}
-              className={`discount-btn discount-btn-p15 ${item.discount_type === 'p15' ? 'active' : ''}`}>
-              15%
-            </button>
-            <button
-              onClick={handleP100Toggle}
-              aria-pressed={item.discount_type === 'p100'}
-              className={`discount-btn discount-btn-p100 ${item.discount_type === 'p100' ? 'active' : ''}`}>
-              100%
-            </button>
-          </>
+          <button
+            onClick={handleOpenDiscountModal}
+            aria-haspopup="dialog"
+            className={`discount-btn discount-btn-picker ${item.discount_type ? 'active' : ''}`}>
+            <Tag size={11} className="shrink-0" style={{ marginRight: 4 }} />
+            {item.discount_type ? discountLabel(item.discount_type) : 'Discount'}
+          </button>
         )}
         {item.discount_type && (
           <span className="ml-auto text-xs font-semibold text-emerald-600">
@@ -1840,10 +1868,65 @@ const CartItemRow = memo(function CartItemRow({
           </span>
         )}
       </div>
+      {showDiscountModal && (
+        <DiscountPickerModal
+          activeType={item.discount_type}
+          onSelect={handleSelectDiscount}
+          onClose={handleCloseDiscountModal}
+        />
+      )}
       {/* CartAddonPickerModal is NO LONGER rendered here — it's in POSPage */}
     </article>
   );
 });
+
+// ─── Discount Picker Modal — single entry point listing every ──
+// available discount type for a cart line, opened from the one
+// "Discount" button on CartItemRow.
+const DISCOUNT_OPTIONS: { type: Exclude<CartItem['discount_type'], null>; label: string; hint: string; className: string }[] = [
+  { type: 'sc',   label: 'Senior Citizen (SC)', hint: 'Fixed peso amount off the line', className: 'discount-btn-sc' },
+  { type: 'pwd',  label: 'PWD',                 hint: 'Fixed peso amount off the line', className: 'discount-btn-pwd' },
+  { type: 'p15',  label: '15% Off',             hint: '15% off this line',              className: 'discount-btn-p15' },
+  { type: 'p100', label: '100% Off',            hint: 'Comps this line entirely',        className: 'discount-btn-p100' },
+  { type: 'p10',  label: '-₱10 Discount',       hint: '₱10 off this line',              className: 'discount-btn-p10' },
+];
+
+function DiscountPickerModal({
+  activeType, onSelect, onClose,
+}: {
+  activeType: CartItem['discount_type'];
+  onSelect: (type: Exclude<CartItem['discount_type'], null>) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal open onClose={onClose} title="🏷️ Discounts" maxWidth="max-w-sm">
+      <div className="flex flex-col gap-2">
+        {DISCOUNT_OPTIONS.map(opt => {
+          const isActive = activeType === opt.type;
+          return (
+            <button
+              key={opt.type}
+              onClick={() => onSelect(opt.type)}
+              aria-pressed={isActive}
+              className={clsx(
+                'flex items-center justify-between gap-3 px-4 py-3 rounded-2xl border-2 transition-colors duration-100 text-left',
+                isActive ? 'border-emerald-400 bg-emerald-50' : 'border-gray-200 bg-white hover:border-gray-300'
+              )}>
+              <div className="min-w-0">
+                <div className={`discount-btn ${opt.className} ${isActive ? 'active' : ''}`} style={{ display: 'inline-block', marginBottom: 4 }}>
+                  {opt.label}
+                </div>
+                <div className="text-xs text-gray-400">{opt.hint}</div>
+              </div>
+              {isActive && <span className="text-emerald-600 font-700 text-xs shrink-0">Applied ✓</span>}
+            </button>
+          );
+        })}
+        <Btn variant="secondary" onClick={onClose} className="mt-1">Close</Btn>
+      </div>
+    </Modal>
+  );
+}
 
 // ─── Size Picker Modal ────────────────────────────────────────
 function SizePickerModal({

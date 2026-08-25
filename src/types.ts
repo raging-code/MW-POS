@@ -10,7 +10,7 @@ export type Page =
   | 'admin_audit';
 
 export type OrderType = 'dine_in' | 'take_out';
-export type DiscountType = 'sc' | 'pwd' | 'p15' | 'p100' | null;
+export type DiscountType = 'sc' | 'pwd' | 'p15' | 'p100' | 'p10' | null;
 export type PaymentMethod = 'cash' | 'gcash' | 'maya';
 
 // ─── Auth ─────────────────────────────────────────────────────

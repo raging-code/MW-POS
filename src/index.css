@@ -524,6 +524,11 @@ body {
 .discount-btn-p15.active { background: #EA580C; color: #fff; border-color: #EA580C; }
 .discount-btn-p100 { background: #FEF2F2; color: #B91C1C; border-color: #FECACA; }
 .discount-btn-p100.active { background: #DC2626; color: #fff; border-color: #DC2626; }
+.discount-btn-p10  { background: #ECFDF5; color: #047857; border-color: #A7F3D0; }
+.discount-btn-p10.active { background: #059669; color: #fff; border-color: #059669; }
+/* Single "Discount" trigger button on the cart row — opens DiscountPickerModal */
+.discount-btn-picker { background: #F9FAFB; color: #4B5563; border-color: #E5E7EB; display: inline-flex; align-items: center; }
+.discount-btn-picker.active { background: #ECFDF5; color: #047857; border-color: #A7F3D0; }
 
 /* ── Toast ── */
 .toast-enter { animation: fadeUp 0.16s ease-out forwards; }

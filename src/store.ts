@@ -170,6 +170,10 @@ function computeItemTotals(
   } else if (item.discount_type === 'p100') {
     // 100% off — comps the line entirely.
     discount_amount = total_before_discount;
+  } else if (item.discount_type === 'p10') {
+    // Flat ₱10 off the line (not multiplied by qty) — clamp so it never
+    // exceeds the line's own total.
+    discount_amount = Math.min(10, total_before_discount);
   } else {
     const discPct = item.discount_pct / 100;
     discount_amount = Math.round(total_before_discount * discPct * 100) / 100;
