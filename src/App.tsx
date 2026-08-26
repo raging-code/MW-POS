@@ -2059,6 +2059,10 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   // changes hands.
   const { data: menuData, refetch: refetchMenu, isFetching: menuChecking } = useMenu();
   const [freshMenuChecked, setFreshMenuChecked] = useState(false);
+  // FIX #17: needed so the mismatch handler below can actually strip a
+  // disallowed discount off a cart line instead of just refetching and
+  // re-toasting (see doCheckout's catch block).
+  const setDiscountAction = useCartStore(s => s.setDiscount);
   useEffect(() => {
     let cancelled = false;
     refetchMenu().finally(() => { if (!cancelled) setFreshMenuChecked(true); });
@@ -2142,6 +2146,28 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
     [cartItems, categoryDiscountDisabled]
   );
 
+  // FIX #17: blockedDiscountLines only gates the button + toast — it
+  // never touches cart.items, and total/cartSubtotal/discountTotal/
+  // payments are all derived purely from cart.items. So after a
+  // mismatch + refetch, the cart still carries the disallowed discount
+  // and resubmitting fails again with the identical error. This helper
+  // takes a FRESH categories list (passed explicitly so it never reads
+  // a stale closure over menuData) and actually removes the discount
+  // from every line that's now blocked, returning their names.
+  const clearBlockedDiscounts = useCallback((freshCategories: Category[] | undefined) => {
+    const disabledMap = new Map<string, boolean>();
+    for (const cat of freshCategories ?? []) disabledMap.set(cat.id, !!cat.discount_disabled);
+    const cleared: string[] = [];
+    for (const item of cartItems) {
+      const isDiscounted = item.discount_type != null || item.discount_pct > 0;
+      if (isDiscounted && item.category_id != null && disabledMap.get(item.category_id) === true) {
+        setDiscountAction(item.cart_key, null);
+        cleared.push(item.item_name);
+      }
+    }
+    return cleared;
+  }, [cartItems, setDiscountAction]);
+
   const doCheckout = useCallback(async () => {
     if (!user) return;
     if (blockedDiscountLines.length > 0) {
@@ -2192,18 +2218,27 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
       if (/does not match order total/i.test(msg)) {
         // The server rejected our totals — almost always because a
         // category's discount rules changed after we last fetched the
-        // menu (see FIX #16 above). Refresh so the client's guard and
-        // totals match the server's reality, and tell the cashier what
-        // actually happened instead of showing the raw payment-vs-order
-        // numbers, which is meaningless to them.
-        refetchMenu();
-        toast('Discount rules changed for one or more items — totals were refreshed. Please re-check the amount and try again.', 'error');
+        // menu (see FIX #16 above). FIX #17: refetching alone doesn't
+        // fix anything — total/payments are derived from cart.items,
+        // which the refetch never touches, so retrying would fail the
+        // same way forever. Pull the fresh categories directly from the
+        // refetch result and strip the discount from every line that's
+        // now actually disallowed, so the corrected total is what the
+        // cashier sees and resubmits.
+        const freshResult = await refetchMenu();
+        const cleared = clearBlockedDiscounts(freshResult.data?.categories);
+        if (cleared.length > 0) {
+          toast(`Discount removed from "${cleared[0]}"${cleared.length > 1 ? ` and ${cleared.length - 1} other item(s)` : ''} — discounts are disabled for its category. Totals updated, please re-check and confirm.`, 'error');
+        } else {
+          toast('Discount rules changed for one or more items — totals were refreshed. Please re-check the amount and try again.', 'error');
+        }
       } else {
         toast(msg, 'error');
       }
     }
   }, [user, cartItems, cartNote, cartIdempotency, discountTotal, cartSubtotal,
-      checkout, shift, hasCash, tendered, tenderedNum, payments, refetchMenu]);
+      checkout, shift, hasCash, tendered, tenderedNum, payments, refetchMenu,
+      blockedDiscountLines, clearBlockedDiscounts]);
 
   return (
     <Modal
