@@ -1060,13 +1060,20 @@ app.post('/api/sales', async (c) => {
     const itemBase = (item.base_price + addonsTotal) * item.qty
     const categoryBlocksDiscount = discountDisabledByItemId.get(item.item_id) === true
     let discAmt = 0
-    if (categoryBlocksDiscount) {
+    // FIX #19: categories.discount_disabled was built to gate SC/PWD/
+    // manual discounts only (see column comment above and migration
+    // 0004) — p10 (-₱10) is a flat promo discount and was never meant
+    // to be blockable by that flag. It must be computed before/outside
+    // the categoryBlocksDiscount check so a "No Discount" category
+    // doesn't silently zero it out.
+    if (item.discount_type === 'p10') {
+      discAmt = Math.min(10, itemBase)
+    } else if (categoryBlocksDiscount) {
       discAmt = 0
     } else if (item.discount_type === 'sc') discAmt = Math.min(scAmt, itemBase)
     else if (item.discount_type === 'pwd') discAmt = Math.min(pwdAmt, itemBase)
     else if (item.discount_type === 'p15') discAmt = itemBase * 0.15
     else if (item.discount_type === 'p100') discAmt = itemBase
-    else if (item.discount_type === 'p10') discAmt = Math.min(10, itemBase)
     else if (item.discount_pct > 0) discAmt = itemBase * (item.discount_pct / 100)
     discAmt = Math.round(discAmt * 100) / 100
     const finalPrice = Math.round((itemBase - discAmt) * 100) / 100

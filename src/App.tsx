@@ -2144,8 +2144,13 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   }, [menuData]);
 
   const blockedDiscountLines = useMemo(
+    // FIX #19: p10 (-₱10) is a flat promo discount, not the SC/PWD/
+    // manual discount categories.discount_disabled was built to gate
+    // (see server-side comment). Exclude p10 lines here so this guard
+    // agrees with the server and doesn't block/strip a valid discount.
     () => cartItems.filter(i =>
       (i.discount_type != null || i.discount_pct > 0) &&
+      i.discount_type !== 'p10' &&
       i.category_id != null &&
       categoryDiscountDisabled.get(i.category_id) === true
     ),
@@ -2166,7 +2171,10 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
     const cleared: string[] = [];
     for (const item of cartItems) {
       const isDiscounted = item.discount_type != null || item.discount_pct > 0;
-      if (isDiscounted && item.category_id != null && disabledMap.get(item.category_id) === true) {
+      // FIX #19: don't strip a valid p10 (-₱10) discount — it's exempt
+      // from categories.discount_disabled, same reasoning as
+      // blockedDiscountLines above.
+      if (isDiscounted && item.discount_type !== 'p10' && item.category_id != null && disabledMap.get(item.category_id) === true) {
         setDiscountAction(item.cart_key, null);
         cleared.push(item.item_name);
       }
