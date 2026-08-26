@@ -2044,7 +2044,28 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   const { user } = useAuthStore();
   // FIX #4: needed to check each cart line's category discount_disabled
   // flag before checkout — see blockedDiscountLines below.
-  const { data: menuData } = useMenu();
+  //
+  // FIX #16: useMenu() is cached with a 5-min staleTime and window-focus
+  // refetching is globally disabled (see main.tsx / api.ts), so the
+  // category data blockedDiscountLines relies on can be stale on THIS
+  // terminal for up to 5 minutes even when it's fresh on the server. If
+  // an admin disables discounts on a category from another terminal, a
+  // cashier here can still add a "discounted" item, have the (stale)
+  // guard let it through, submit a total that includes the discount, and
+  // get rejected by the server — which always re-checks live — with a
+  // "Payment total (X) does not match order total (Y)" error equal to
+  // the discount amount. Force a fresh fetch the moment this modal opens
+  // so the guard is checked against live data right before money
+  // changes hands.
+  const { data: menuData, refetch: refetchMenu, isFetching: menuChecking } = useMenu();
+  const [freshMenuChecked, setFreshMenuChecked] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    refetchMenu().finally(() => { if (!cancelled) setFreshMenuChecked(true); });
+    return () => { cancelled = true; };
+    // Only on mount — this modal is remounted each time checkout opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // FIX: Replace full useCartStore() with targeted selectors.
   // cart.total() called on the full store caused this modal to re-render on
   // every cart mutation. useCartTotal() subscribes only to the computed total
@@ -2167,10 +2188,22 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
       });
       setStep('success');
     } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : 'Checkout failed', 'error');
+      const msg = e instanceof Error ? e.message : 'Checkout failed';
+      if (/does not match order total/i.test(msg)) {
+        // The server rejected our totals — almost always because a
+        // category's discount rules changed after we last fetched the
+        // menu (see FIX #16 above). Refresh so the client's guard and
+        // totals match the server's reality, and tell the cashier what
+        // actually happened instead of showing the raw payment-vs-order
+        // numbers, which is meaningless to them.
+        refetchMenu();
+        toast('Discount rules changed for one or more items — totals were refreshed. Please re-check the amount and try again.', 'error');
+      } else {
+        toast(msg, 'error');
+      }
     }
   }, [user, cartItems, cartNote, cartIdempotency, discountTotal, cartSubtotal,
-      checkout, shift, hasCash, tendered, tenderedNum, payments]);
+      checkout, shift, hasCash, tendered, tenderedNum, payments, refetchMenu]);
 
   return (
     <Modal
@@ -2319,9 +2352,9 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
           <div className="flex gap-2.5">
             <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
             <Btn variant="mango" size="lg" onClick={doCheckout}
-              disabled={blockedDiscountLines.length > 0 || !balanced || !tenderedOk}
-              loading={checkout.isPending} className="flex-[2]">
-              Confirm Sale
+              disabled={blockedDiscountLines.length > 0 || !balanced || !tenderedOk || !freshMenuChecked || menuChecking}
+              loading={checkout.isPending || !freshMenuChecked} className="flex-[2]">
+              {!freshMenuChecked ? 'Checking latest prices…' : 'Confirm Sale'}
             </Btn>
           </div>
         </div>
