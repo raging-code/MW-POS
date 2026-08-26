@@ -87,6 +87,18 @@ function discountLabel(type: string | null | undefined) {
     default: return '';
   }
 }
+// FIX: Asia/Manila (UTC+8) local calendar date as "YYYY-MM-DD".
+// new Date().toISOString().slice(0, 10) gives the UTC date, which is
+// wrong for roughly 8 hours a day in Manila (00:00-07:59 local time is
+// still "yesterday" in UTC). The server's manilaToUTC() treats date
+// filter strings as Manila calendar days, so the client must produce
+// the same calendar day it, or sales right after local midnight won't
+// show up until the date field is manually bumped forward.
+function getManilaDateString(d: Date = new Date()): string {
+  // en-CA locale formats as YYYY-MM-DD, which is what we want.
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(d);
+}
+
 function fmtDate(iso: string) {
   try { return format(parseISO(iso), 'MMM d, yyyy h:mm a'); } catch { return iso; }
 }
@@ -2030,6 +2042,9 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   shift: Shift | null | undefined; onClose: () => void; onSuccess: () => void;
 }) {
   const { user } = useAuthStore();
+  // FIX #4: needed to check each cart line's category discount_disabled
+  // flag before checkout — see blockedDiscountLines below.
+  const { data: menuData } = useMenu();
   // FIX: Replace full useCartStore() with targeted selectors.
   // cart.total() called on the full store caused this modal to re-render on
   // every cart mutation. useCartTotal() subscribes only to the computed total
@@ -2084,8 +2099,34 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
     } : p));
   }, []);
 
+  // FIX #4: a cart line can carry a discount that its category no
+  // longer allows — e.g. the line was added before an admin toggled
+  // "discounts disabled" on for that category, or the item's category
+  // changed. The server always re-checks this from the DB and zeroes
+  // the discount, but the client's cart total wouldn't reflect that,
+  // so the cashier would tender an amount the server then rejects.
+  // Catch it here, before attempting checkout.
+  const categoryDiscountDisabled = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const cat of menuData?.categories ?? []) map.set(cat.id, !!cat.discount_disabled);
+    return map;
+  }, [menuData]);
+
+  const blockedDiscountLines = useMemo(
+    () => cartItems.filter(i =>
+      (i.discount_type != null || i.discount_pct > 0) &&
+      i.category_id != null &&
+      categoryDiscountDisabled.get(i.category_id) === true
+    ),
+    [cartItems, categoryDiscountDisabled]
+  );
+
   const doCheckout = useCallback(async () => {
     if (!user) return;
+    if (blockedDiscountLines.length > 0) {
+      toast(`Remove the discount on "${blockedDiscountLines[0].item_name}" — discounts are disabled for its category`, 'error');
+      return;
+    }
     try {
       const res = await checkout.mutateAsync({
         idempotency_key: cartIdempotency,
@@ -2278,7 +2319,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
           <div className="flex gap-2.5">
             <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
             <Btn variant="mango" size="lg" onClick={doCheckout}
-              disabled={!balanced || !tenderedOk}
+              disabled={blockedDiscountLines.length > 0 || !balanced || !tenderedOk}
               loading={checkout.isPending} className="flex-[2]">
               Confirm Sale
             </Btn>
@@ -2899,8 +2940,8 @@ function EditSaleModal({ sale, onClose, onDone }: { sale: SaleDetail; onClose: (
 // ─── Sales Page ────────────────────────────────────────────────
 function SalesPage() {
   const openPinModal = useUIStore(s => s.openPinModal);
-  const [dateFrom, setDateFrom] = useState(new Date().toISOString().slice(0, 10));
-  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState(getManilaDateString());
+  const [dateTo, setDateTo] = useState(getManilaDateString());
   const [statusFilter, setStatusFilter] = useState('');
   const [receiptQ, setReceiptQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -4236,7 +4277,7 @@ function AdminMenuPage() {
 // ─── Detailed Report Modal ────────────────────────────────────
 function DetailedReportModal({ onClose }: { onClose: () => void }) {
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
-  const [dateValue, setDateValue] = useState(new Date().toISOString().slice(0, 10));
+  const [dateValue, setDateValue] = useState(getManilaDateString());
   const [year, setYear] = useState(new Date().getFullYear());
   const [month, setMonth] = useState(new Date().getMonth() + 1);
 
@@ -4328,8 +4369,8 @@ function DetailedReportModal({ onClose }: { onClose: () => void }) {
 
 // ─── Admin Dashboard Page ─────────────────────────────────────
 function AdminDashboardPage() {
-  const [dateFrom, setDateFrom] = useState(new Date().toISOString().slice(0, 10));
-  const [dateTo, setDateTo] = useState(new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState(getManilaDateString());
+  const [dateTo, setDateTo] = useState(getManilaDateString());
   const { data: report, isLoading } = useSalesReport({ date_from: dateFrom, date_to: dateTo });
   const { data: shift } = useCurrentShift();
   const { navigate } = useUIStore();

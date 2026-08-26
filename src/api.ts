@@ -327,6 +327,11 @@ export function useCheckout() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sales'] })
       qc.invalidateQueries({ queryKey: ['shift-current'] })
+      // FIX: Dashboard and Detailed Report read from these query keys,
+      // not ['sales']. Without this they kept showing stale (often
+      // ₱0.00) totals after a checkout.
+      qc.invalidateQueries({ queryKey: ['report-sales'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
     },
   })
 }
@@ -369,7 +374,11 @@ export function useVoidSale() {
       actioned_by_name?: string;
     }) =>
       api.post(`/sales/${id}/void`, { reason, actioned_by_user_id, actioned_by_name }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sales'] })
+      qc.invalidateQueries({ queryKey: ['report-sales'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
+    },
   })
 }
 
@@ -385,7 +394,11 @@ export function useRefundSale() {
       actioned_by_name?: string;
     }) =>
       api.post(`/sales/${id}/refund`, { reason, actioned_by_user_id, actioned_by_name }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sales'] })
+      qc.invalidateQueries({ queryKey: ['report-sales'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
+    },
   })
 }
 
@@ -395,7 +408,11 @@ export function useSoftDeleteSale() {
   return useMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) =>
       api.del(`/sales/${id}`, { reason }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sales'] })
+      qc.invalidateQueries({ queryKey: ['report-sales'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
+    },
   })
 }
 
@@ -408,6 +425,8 @@ export function usePurgeAllSales() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sales'] })
       qc.invalidateQueries({ queryKey: ['shifts'] })
+      qc.invalidateQueries({ queryKey: ['report-sales'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
     },
   })
 }
@@ -438,6 +457,8 @@ export function useEditSale() {
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['sales'] })
       qc.invalidateQueries({ queryKey: ['sale', vars.id] })
+      qc.invalidateQueries({ queryKey: ['report-sales'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
     },
   })
 }
