@@ -227,7 +227,22 @@ export const useCartStore = create<CartStore>()((set, get) => ({
   scPct: 20,
   pwdPct: 20,
 
-  setDiscountPcts: (sc, pwd) => set({ scPct: sc, pwdPct: pwd }),
+  // FIX #18: previously this only overwrote scPct/pwdPct — existing
+  // cart lines keep whatever discount_amount they were computed with
+  // until something else touches that line (qty/addon/discount change).
+  // If an admin changes the SC/PWD peso amount from another terminal
+  // while a line using 'sc' or 'pwd' is already in the cart, the
+  // client total silently drifts from what the server will compute.
+  // Recompute every line immediately so the two rates and the
+  // displayed total can never disagree.
+  setDiscountPcts: (sc, pwd) => set((state) => ({
+    scPct: sc,
+    pwdPct: pwd,
+    cart: {
+      ...state.cart,
+      items: state.cart.items.map((i) => computeItemTotals(i, sc, pwd)),
+    },
+  })),
 
   addItem: ({ item_id, item_name, category_id = null, size_name, base_price, addons = [] }) => {
     set((state) => {

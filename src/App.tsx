@@ -2082,7 +2082,13 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
   // Bug #15 fix: removed unused cartClearCart selector (was subscribing to
   // the store for no reason; the actual clear happens via the onSuccess prop).
   const checkout         = useCheckout();
-  const { data: settings } = useSettings();
+  // FIX #18: refetch + setDiscountPcts pulled in so the mismatch
+  // handler below can re-sync scPct/pwdPct against a LIVE read, not
+  // just the 5-min-stale cached value — see setDiscountPcts's own
+  // comment in store.ts for why that alone is now enough to fix
+  // already-added SC/PWD lines.
+  const { data: settings, refetch: refetchSettings } = useSettings();
+  const setDiscountPctsAction = useCartStore(s => s.setDiscountPcts);
   const total            = useCartTotal();
   const [payments, setPayments] = useState<PaymentLine[]>([{ method: 'cash', amount: total }]);
   const [tendered, setTendered] = useState('');
@@ -2225,10 +2231,25 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
         // refetch result and strip the discount from every line that's
         // now actually disallowed, so the corrected total is what the
         // cashier sees and resubmits.
-        const freshResult = await refetchMenu();
+        const [freshResult, freshSettings] = await Promise.all([refetchMenu(), refetchSettings()]);
         const cleared = clearBlockedDiscounts(freshResult.data?.categories);
-        if (cleared.length > 0) {
+        // FIX #18: also re-sync scPct/pwdPct from a live settings read.
+        // setDiscountPctsAction recomputes every cart line's totals as
+        // part of this call (see store.ts), so an SC/PWD line whose
+        // peso amount changed on another terminal is corrected here too,
+        // not just lines blocked by a category's discount_disabled flag.
+        const prevScPct = useCartStore.getState().scPct;
+        const prevPwdPct = useCartStore.getState().pwdPct;
+        const nextScPct = parseFloat(freshSettings.data?.sc_discount_pct ?? String(prevScPct));
+        const nextPwdPct = parseFloat(freshSettings.data?.pwd_discount_pct ?? String(prevPwdPct));
+        const scPwdChanged = nextScPct !== prevScPct || nextPwdPct !== prevPwdPct;
+        if (scPwdChanged) setDiscountPctsAction(nextScPct, nextPwdPct);
+        if (cleared.length > 0 && scPwdChanged) {
+          toast(`Discount rules changed for "${cleared[0]}" and possibly other items — totals were refreshed. Please re-check and confirm.`, 'error');
+        } else if (cleared.length > 0) {
           toast(`Discount removed from "${cleared[0]}"${cleared.length > 1 ? ` and ${cleared.length - 1} other item(s)` : ''} — discounts are disabled for its category. Totals updated, please re-check and confirm.`, 'error');
+        } else if (scPwdChanged) {
+          toast('The senior/PWD discount amount changed — totals were refreshed. Please re-check the amount and try again.', 'error');
         } else {
           toast('Discount rules changed for one or more items — totals were refreshed. Please re-check the amount and try again.', 'error');
         }
@@ -2238,7 +2259,7 @@ function CheckoutModal({ shift, onClose, onSuccess }: {
     }
   }, [user, cartItems, cartNote, cartIdempotency, discountTotal, cartSubtotal,
       checkout, shift, hasCash, tendered, tenderedNum, payments, refetchMenu,
-      blockedDiscountLines, clearBlockedDiscounts]);
+      blockedDiscountLines, clearBlockedDiscounts, refetchSettings, setDiscountPctsAction]);
 
   return (
     <Modal
