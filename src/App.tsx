@@ -838,8 +838,27 @@ function LoginPage() {
   }, [selectedUser, press]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--surface-page)' }}>
-      <div className="w-full max-w-sm">
+    // FIX #17: iPad/tablet landscape can't scroll the login screen.
+    //
+    // body { overflow: hidden } is intentional (kiosk-mode, prevents
+    // rubber-band scroll on the main POS screens — see index.css), but it
+    // means the DOCUMENT can never scroll as a fallback. This wrapper was
+    // `min-h-screen flex items-center justify-center` with no scroll
+    // container of its own, so whenever the login card (logo + account
+    // list, or logo + PIN pad + numpad) is taller than the viewport —
+    // very easy on iPad landscape, where height drops to ~700-760px after
+    // Safari's chrome — the overflow was just clipped with no way to
+    // reach it, on iPad or any other short-viewport device.
+    //
+    // Fix: give this screen its own scroll container (`overflow-y-auto`)
+    // sized to the available height (`h-full`, matching #root), with an
+    // inner `min-h-full` flex wrapper so short content still centers
+    // vertically like before, and tall content scrolls instead of
+    // clipping. `-webkit-overflow-scrolling: touch` keeps scrolling
+    // smooth on iPad/older Safari-based POS devices.
+    <div className="h-full w-full overflow-y-auto overscroll-contain" style={{ background: 'var(--surface-page)', WebkitOverflowScrolling: 'touch' }}>
+      <div className="min-h-full flex items-center justify-center p-4">
+        <div className="w-full max-w-sm">
         <div className="text-center mb-8">
 <div className="w-20 h-20 flex items-center justify-center mx-auto mb-4">
   <img src="/MWIcon.png" alt="MW POS" className="w-full h-full object-contain" />
@@ -942,6 +961,7 @@ function LoginPage() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );
