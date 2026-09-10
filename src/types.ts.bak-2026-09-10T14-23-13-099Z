@@ -153,7 +153,6 @@ export interface SaleListItem {
 
 // ─── Shifts ───────────────────────────────────────────────────
 export interface CashDrop {
-  type: 'drop' | 'cash_in';
   id: string;
   amount: number;
   reason: string;

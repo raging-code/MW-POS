@@ -22,7 +22,7 @@ import type {
 } from './types';
 import {
   useUsersList, useLogin, useVerifyPin, useMenu, useCurrentShift,
-  useOpenShift, useCloseShift, useCashDrop, useCashIn, useHeldOrders,
+  useOpenShift, useCloseShift, useCashDrop, useHeldOrders,
   useCreateHeldOrder, useDeleteHeldOrder, useCheckout, useSales,
   useSaleDetail, useVoidSale, useRefundSale, useSoftDeleteSale,
   useReprintSale, useSalesReport, useSettings, useUpdateSettings, usePurgeAllSales,
@@ -2582,21 +2582,18 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
   const openShift = useOpenShift();
   const closeShift = useCloseShift();
   const cashDrop = useCashDrop();
-  const cashIn = useCashIn();
 
   const [startFloat, setStartFloat] = useState('0');
   const [closingCash, setClosingCash] = useState('');
   const [closeNotes, setCloseNotes] = useState('');
   const [dropAmount, setDropAmount] = useState('');
   const [dropReason, setDropReason] = useState('');
-  const [cashInAmount, setCashInAmount] = useState('');
-  const [cashInReason, setCashInReason] = useState('');
-  const [tab, setTab] = useState<'overview' | 'close' | 'drop' | 'cash-in'>('overview');
+  const [tab, setTab] = useState<'overview' | 'close' | 'drop'>('overview');
 
   const [showAnyPin, setShowAnyPin] = useState(false);
-  const [pendingAction, setPendingAction] = useState<'open' | 'close' | 'drop' | 'cash-in' | null>(null);
+  const [pendingAction, setPendingAction] = useState<'open' | 'close' | 'drop' | null>(null);
 
-  const triggerAction = useCallback((action: 'open' | 'close' | 'drop' | 'cash-in') => {
+  const triggerAction = useCallback((action: 'open' | 'close' | 'drop') => {
     setPendingAction(action);
     setShowAnyPin(true);
   }, []);
@@ -2621,17 +2618,12 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
         toast('Cash drop recorded');
         setDropAmount(''); setDropReason('');
         onCloseRef.current();
-      } else if (pendingAction === 'cash-in' && shift && cashInReason) {
-        await cashIn.mutateAsync({ shift_id: shift.id, amount: parseFloat(cashInAmount) || 0, reason: cashInReason });
-        toast('Cash in recorded');
-        setCashInAmount(''); setCashInReason('');
-        onCloseRef.current();
       }
     } catch (e: unknown) {
       toast(e instanceof Error ? e.message : 'Action failed', 'error');
     }
     setPendingAction(null);
-  }, [pendingAction, openShift, closeShift, cashDrop, cashIn, shift, startFloat, closingCash, closeNotes, dropAmount, dropReason, cashInAmount, cashInReason]);
+  }, [pendingAction, openShift, closeShift, cashDrop, shift, startFloat, closingCash, closeNotes, dropAmount, dropReason]);
 
   if (!shift) {
     return (
@@ -2660,23 +2652,21 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
   }
 
   const cashTotal = shift.payment_totals?.cash ?? 0;
-  const cashDropTotal = (shift.cash_drops ?? []).filter((d: CashDrop) => d.type !== 'cash_in').reduce((s, d: CashDrop) => s + d.amount, 0);
-  const cashInTotal = (shift.cash_drops ?? []).filter((d: CashDrop) => d.type === 'cash_in').reduce((s, d: CashDrop) => s + d.amount, 0);
-  const expectedCash = (shift.starting_float ?? 0) + cashTotal + cashInTotal - cashDropTotal;
+  const expectedCash = (shift.starting_float ?? 0) + cashTotal - (shift.cash_drops ?? []).reduce((s, d: CashDrop) => s + d.amount, 0);
   const variance = parseFloat(closingCash || '0') - expectedCash;
 
   return (
     <>
       <Modal open onClose={onClose} title="📊 Shift Management" maxWidth="max-w-md">
         <div className="flex gap-1 mb-5 bg-gray-100 p-1 rounded-xl" role="tablist">
-          {(['overview', 'drop', 'cash-in', 'close'] as const).map(t => (
+          {(['overview', 'drop', 'close'] as const).map(t => (
             <button key={t} onClick={() => setTab(t)}
               role="tab" aria-selected={tab === t}
               className={clsx('flex-1 py-2 rounded-xl text-xs font-700 capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400',
                 tab === t ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
               )}
               style={{ fontFamily: 'var(--font-display)', fontWeight: 700 }}>
-              {t === 'drop' ? 'Cash Drop' : t === 'cash-in' ? 'Cash In' : t === 'close' ? 'Close Shift' : 'Overview'}
+              {t === 'drop' ? 'Cash Drop' : t === 'close' ? 'Close Shift' : 'Overview'}
             </button>
           ))}
         </div>
@@ -2693,11 +2683,11 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
             </div>
             {(shift.cash_drops ?? []).length > 0 && (
               <div>
-                <p className="text-xs font-700 text-gray-500 mb-2 uppercase tracking-wider" style={{ fontWeight: 700 }}>Cash Movements</p>
+                <p className="text-xs font-700 text-gray-500 mb-2 uppercase tracking-wider" style={{ fontWeight: 700 }}>Cash Drops</p>
                 {shift.cash_drops.map((d: CashDrop) => (
                   <div key={d.id} className="flex justify-between text-xs text-gray-600 py-2 border-b border-gray-100">
                     <span className="font-medium">{d.reason}</span>
-                    <span className={d.type === 'cash_in' ? 'text-green-600 font-700' : 'text-red-500 font-700'} style={{ fontWeight: 700 }}>{d.type === 'cash_in' ? '+' : '−'}{fmt(d.amount)}</span>
+                    <span className="text-red-500 font-700" style={{ fontWeight: 700 }}>−{fmt(d.amount)}</span>
                   </div>
                 ))}
               </div>
@@ -2718,19 +2708,6 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
             </div>
           </div>
         )}
-        {tab === 'cash-in' && (
-          <div className="flex flex-col gap-4">
-            <p className="text-sm text-gray-500">Record cash added to the drawer.</p>
-            <Input label="Amount (₱)" type="number" value={cashInAmount} min={0} step={0.01} onChange={setCashInAmount} />
-            <Input label="Reason" value={cashInReason} onChange={setCashInReason} placeholder="e.g. Change fund top-up, Owner injection" />
-            <div className="flex gap-2">
-              <Btn variant="secondary" onClick={onClose} className="flex-1">Cancel</Btn>
-              <Btn variant="mango" onClick={() => triggerAction('cash-in')} loading={cashIn.isPending}
-                disabled={!cashInReason || !cashInAmount} className="flex-1">Record Cash In</Btn>
-            </div>
-          </div>
-        )}
-
 
         {tab === 'close' && (
           <div className="flex flex-col gap-4">

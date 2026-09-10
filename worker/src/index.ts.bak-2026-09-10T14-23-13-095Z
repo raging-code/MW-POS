@@ -118,7 +118,6 @@ const cashDrops = sqliteTable('cash_drops', {
   user_id:    text('user_id').notNull().references(() => users.id),
   amount:     real('amount').notNull(),
   reason:     text('reason').notNull(),
-  type:       text('type', { enum: ['drop', 'cash_in'] }).notNull().default('drop'),
   created_at: text('created_at').notNull().default(sql`(datetime('now'))`),
 })
 
@@ -932,24 +931,8 @@ app.post('/api/shifts/:id/cash-drop', async (c) => {
   if (!shiftRec) return jsonErr('Shift not found', 404)
   if (shiftRec.status !== 'open') return jsonErr('Cannot add a cash drop to a closed shift')
   const id = uid()
-  await db.insert(cashDrops).values({ id, shift_id, user_id: actor.id, amount: body.amount, reason: body.reason, created_at: nowISO(), type: 'drop' })
+  await db.insert(cashDrops).values({ id, shift_id, user_id: actor.id, amount: body.amount, reason: body.reason, created_at: nowISO() })
   await createAuditLog(db, actor.id, 'cash_drop', 'shift', shift_id, null, { amount: body.amount, reason: body.reason }, body.reason)
-  return jsonOk({ id })
-})
-
-app.post('/api/shifts/:id/cash-in', async (c) => {
-  const actor = c.get('user')
-  const db = c.get('db')
-  const shift_id = c.req.param('id')
-  const body = await c.req.json<{ amount: number; reason: string }>()
-  if (!body.reason) return jsonErr('Reason required')
-  if (!body.amount || body.amount <= 0 || !isFinite(body.amount)) return jsonErr('Amount must be a positive number')
-  const shiftRec = await db.select({ status: shifts.status }).from(shifts).where(eq(shifts.id, shift_id)).get()
-  if (!shiftRec) return jsonErr('Shift not found', 404)
-  if (shiftRec.status !== 'open') return jsonErr('Cannot add cash to a closed shift')
-  const id = uid()
-  await db.insert(cashDrops).values({ id, shift_id, user_id: actor.id, amount: body.amount, reason: body.reason, created_at: nowISO(), type: 'cash_in' })
-  await createAuditLog(db, actor.id, 'cash_in', 'shift', shift_id, null, { amount: body.amount, reason: body.reason }, body.reason)
   return jsonOk({ id })
 })
 

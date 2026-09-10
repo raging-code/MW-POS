@@ -286,16 +286,6 @@ export function useCashDrop() {
       api.post(`/shifts/${shift_id}/cash-drop`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['shift-current'] }),
   })
-
-export function useCashIn() {
-  const api = useApi()
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ shift_id, ...body }: { shift_id: string; amount: number; reason: string }) =>
-      api.post(`/shifts/${shift_id}/cash-in`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['shift-current'] }),
-  })
-}
 }
 
 // ─── Held Orders ──────────────────────────────────────────────
