@@ -153,7 +153,7 @@ function computeItemTotals(
 ): CartItem {
   const addons_total = item.addons.reduce((s, a) => s + a.addon_price * a.qty, 0);
   const perUnit = item.base_price + addons_total;
-  const total_before_discount = (item.base_price * item.qty) + addons_total;
+  const total_before_discount = perUnit * item.qty;
   // CHANGED: SC/PWD are now a FIXED PESO AMOUNT off the line, not a
   // percentage. scPct/pwdPct now hold peso amounts (names kept as-is to
   // avoid touching every call site). Clamp so the discount never exceeds

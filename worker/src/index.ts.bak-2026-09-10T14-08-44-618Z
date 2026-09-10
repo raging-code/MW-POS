@@ -1095,7 +1095,7 @@ app.post('/api/sales', async (c) => {
       // source of truth. Manual/custom % discounts still store their rate.
       discount_pct: (item.discount_type === 'sc' || item.discount_type === 'pwd' || item.discount_type === 'p15' || item.discount_type === 'p100' || item.discount_type === 'p10') ? 0 : item.discount_pct,
       discount_amount: discAmt,
-      addons_total:    addonsTotal,
+      addons_total: addonsTotal * item.qty,
       final_price: finalPrice,
     })
 
