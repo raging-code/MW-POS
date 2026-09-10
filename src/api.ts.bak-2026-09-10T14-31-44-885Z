@@ -286,7 +286,6 @@ export function useCashDrop() {
       api.post(`/shifts/${shift_id}/cash-drop`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['shift-current'] }),
   })
-}
 
 export function useCashIn() {
   const api = useApi()
@@ -296,6 +295,7 @@ export function useCashIn() {
       api.post(`/shifts/${shift_id}/cash-in`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['shift-current'] }),
   })
+}
 }
 
 // ─── Held Orders ──────────────────────────────────────────────
