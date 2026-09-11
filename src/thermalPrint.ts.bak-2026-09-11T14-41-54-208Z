@@ -643,8 +643,6 @@ export async function selectAndSavePrinter(): Promise<SavedPrinter | null> {
       return saved;
     } catch (err) {
       console.warn('[ThermalPrint] selectAndSavePrinter error:', err);
-      const msg = err instanceof Error ? err.message : String(err);
-      showPrinterError(`Pairing failed.\n${msg || 'Unknown error. Check Bluetooth is on and permission is granted.'}`);
       return null;
     }
   }
