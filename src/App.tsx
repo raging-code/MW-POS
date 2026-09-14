@@ -3132,7 +3132,7 @@ const SalesByItemPanel = memo(function SalesByItemPanel({
         </div>
       )}
 
-      {report.categories.map(cat => {
+      {report.categories.filter(cat => cat.category_name !== 'Add-ons').map(cat => {
         // Column set: union of every size/variant label seen across this
         // category's items — so partial menus (e.g. one item missing a
         // size) still line up as columns, with a dash for zero sales.
