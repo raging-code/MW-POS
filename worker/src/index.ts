@@ -19,6 +19,9 @@ import { eq, and, desc, asc, gte, lte, sql, not, or, inArray } from 'drizzle-orm
 type Env = {
   DB: D1Database
   TIMEZONE: string
+  // NEW: required to call GET /api/init. Set via:
+  //   cd worker && npx wrangler secret put SETUP_KEY
+  SETUP_KEY?: string
 }
 
 type Variables = {
@@ -1134,6 +1137,14 @@ app.post('/api/sales', async (c) => {
   if (Math.round(paymentTotal * 100) !== Math.round(total * 100)) {
     return jsonErr(`Payment total (${paymentTotal}) does not match order total (${total})`)
   }
+  // NEW: previously, a cash sale with tendered_amount missing/null would
+  // silently record change: 0 instead of rejecting — this guard was the
+  // only thing preventing that, and it only fired when tendered_amount
+  // was PRESENT but too small. Now missing/null is rejected outright too,
+  // so correctness doesn't depend solely on the frontend always sending it.
+  if (hasCash && body.tendered_amount == null) {
+    return jsonErr('Tendered amount is required for cash payments')
+  }
   if (hasCash && body.tendered_amount !== undefined && body.tendered_amount < cashPayments.reduce((s,p)=>s+p.amount,0)) {
     return jsonErr('Tendered amount less than cash portion')
   }
@@ -1613,10 +1624,6 @@ app.get('/api/reports/sales-detailed', async (c) => {
   })
 })
 
-// ============================================================
-// SECTION 14: SETTINGS ROUTES
-// ============================================================
-
 // NEW: GET /api/reports/sales-by-item — quantities sold per item/size,
 // per add-on, and category-level summaries (cups by size, rice meals,
 // snacks). Only 'completed' sales count, matching /reports/sales and
@@ -1760,6 +1767,10 @@ app.get('/api/reports/sales-by-item', async (c) => {
   })
 })
 
+// ============================================================
+// SECTION 14: SETTINGS ROUTES
+// ============================================================
+
 app.get('/api/settings', async (c) => {
   const db = c.get('db')
   const list = await db.select().from(systemSettings)
@@ -1820,10 +1831,21 @@ app.post('/api/inventory/transactions', async (c) => {
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const body = await c.req.json<{ item_id: string; type: 'stock_in' | 'stock_out' | 'wastage'; qty: number; cost?: number; reason?: string }>()
+  // NEW: validate qty the same way /api/shifts/:id/cash-drop already does —
+  // this route previously accepted any qty, including 0, negative, or non-finite.
+  if (!body.qty || body.qty <= 0 || !isFinite(body.qty)) {
+    return jsonErr('Quantity must be a positive number')
+  }
+  const item = await db.select({ current_stock: inventoryItems.current_stock }).from(inventoryItems).where(eq(inventoryItems.id, body.item_id)).get()
+  if (!item) return jsonErr('Inventory item not found', 404)
+  const delta = body.type === 'stock_in' ? body.qty : -body.qty
+  // NEW: reject stock_out/wastage that would take current_stock below zero,
+  // instead of silently allowing it to go negative.
+  if (delta < 0 && item.current_stock + delta < 0) {
+    return jsonErr(`Not enough stock: ${item.current_stock} available, ${body.qty} requested`)
+  }
   const id = uid()
   await db.insert(inventoryTransactions).values({ id, ...body, user_id: actor.id, created_at: nowISO() })
-  // Update stock
-  const delta = body.type === 'stock_in' ? body.qty : -body.qty
   await db.update(inventoryItems)
     .set({ current_stock: sql`current_stock + ${delta}` })
     .where(eq(inventoryItems.id, body.item_id))
@@ -1867,7 +1889,19 @@ app.get('/api/audit-logs', async (c) => {
 // ============================================================
 
 // GET /api/init — creates default admin if no users exist
+// NEW: requires ?setup_key=... matching the SETUP_KEY secret. Without
+// this, /api/init was public and unauthenticated — anyone who found
+// the worker URL before first-time setup could create the admin
+// account themselves. Set the secret with:
+//   cd worker && npx wrangler secret put SETUP_KEY
 app.get('/api/init', async (c) => {
+  if (!c.env.SETUP_KEY) {
+    return jsonErr('Server misconfigured: SETUP_KEY secret is not set. Run: wrangler secret put SETUP_KEY', 500)
+  }
+  const providedKey = c.req.query('setup_key')
+  if (providedKey !== c.env.SETUP_KEY) {
+    return jsonErr('Unauthorized', 401)
+  }
   const db = drizzle(c.env.DB)
   const existing = await db.select({ id: users.id }).from(users).limit(1)
   if (existing.length > 0) return jsonOk({ already_initialized: true })
