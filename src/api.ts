@@ -521,6 +521,37 @@ export function useDetailedSalesReport(params: {
   })
 }
 
+// NEW: sold quantities per item/size/add-on, grouped by category.
+// See worker/src/index.ts GET /api/reports/sales-by-item for the
+// aggregation rules (drink sizes vs. flavor-variant categories).
+export interface SalesByItemCategory {
+  category_name: string;
+  kind: 'drink' | 'flavor_qty' | 'other';
+  items: {
+    item_name: string;
+    sizes: Record<string, number>;
+    flat_qty: number;
+  }[];
+}
+export interface SalesByItemReport {
+  size_totals: Record<string, number>;
+  flavor_qty_totals: Record<string, number>;
+  categories: SalesByItemCategory[];
+  addons: { addon_name: string; qty: number }[];
+}
+
+export function useSalesByItemReport(params?: { date_from?: string; date_to?: string }) {
+  const api = useApi()
+  const qs = new URLSearchParams()
+  if (params?.date_from) qs.set('date_from', params.date_from)
+  if (params?.date_to) qs.set('date_to', params.date_to)
+  return useQuery({
+    queryKey: ['report-sales-by-item', params],
+    queryFn: ({ signal }) => api.get<SalesByItemReport>(`/reports/sales-by-item?${qs}`, signal),
+    placeholderData: keepPreviousData,
+  })
+}
+
 // ─── Settings ─────────────────────────────────────────────────
 export function useSettings() {
   const api = useApi()

@@ -1617,6 +1617,149 @@ app.get('/api/reports/sales-detailed', async (c) => {
 // SECTION 14: SETTINGS ROUTES
 // ============================================================
 
+// NEW: GET /api/reports/sales-by-item — quantities sold per item/size,
+// per add-on, and category-level summaries (cups by size, rice meals,
+// snacks). Only 'completed' sales count, matching /reports/sales and
+// /reports/sales-detailed. Category is resolved from the CURRENT menu
+// (item_id_ref -> menu_items -> categories); items whose menu record
+// was deleted, or that were never linked, fall into "Uncategorized /
+// Deleted Items" so old sales are never silently dropped.
+//
+// Category "kind" controls how each category's numbers roll into the
+// headline summary cards:
+//   'drink'      — sizes are real sizes (Regular/Large); summed by the
+//                  literal size_name text, combined across every drink
+//                  category into one Large-cups / Regular-cups total.
+//   'flavor_qty' — the size_name column actually holds a flavor/sauce
+//                  variant (e.g. Rice Meals' C/SBQ/HGT/G/SBF/S&S/None),
+//                  not a size. Variant is collapsed away for the
+//                  headline number; only a flat item-level qty is kept.
+//   'other'      — no headline card; still shown in the per-item detail.
+//
+// This mapping is intentionally explicit rather than guessed from data,
+// because nothing in the schema distinguishes "size" text from "flavor"
+// text — see CATEGORY_KIND_OVERRIDES below to adjust it.
+const CATEGORY_KIND_OVERRIDES: Record<string, 'drink' | 'flavor_qty' | 'other'> = {
+  'Rice Meals': 'flavor_qty',
+  'Snacks': 'flavor_qty',
+}
+function categoryKind(categoryName: string): 'drink' | 'flavor_qty' | 'other' {
+  return CATEGORY_KIND_OVERRIDES[categoryName] ?? 'drink'
+}
+
+app.get('/api/reports/sales-by-item', async (c) => {
+  const db = c.get('db')
+  const date_from = c.req.query('date_from')
+  const date_to = c.req.query('date_to')
+
+  let from: string | undefined
+  let to: string | undefined
+  try {
+    if (date_from) from = manilaToUTC(date_from, 'start')
+    if (date_to) to = manilaToUTC(date_to, 'end')
+  } catch (err) {
+    return jsonErr(err instanceof Error ? err.message : 'Invalid date parameter', 400)
+  }
+
+  // Only completed sales within range, joined down to their line items.
+  const whereClauses = [eq(sales.status, 'completed')]
+  if (from) whereClauses.push(gte(sales.created_at, from))
+  if (to) whereClauses.push(lte(sales.created_at, to))
+
+  const rows = await db.select({
+    sale_item_id: saleItems.id,
+    item_id_ref: saleItems.item_id_ref,
+    item_name: saleItems.item_name,
+    size_name: saleItems.size_name,
+    qty: saleItems.qty,
+    category_name: categories.name,
+  }).from(saleItems)
+    .innerJoin(sales, eq(saleItems.sale_id, sales.id))
+    .leftJoin(menuItems, eq(saleItems.item_id_ref, menuItems.id))
+    .leftJoin(categories, eq(menuItems.category_id, categories.id))
+    .where(and(...whereClauses))
+
+  const saleItemIds = rows.map(r => r.sale_item_id)
+  const addonRows = saleItemIds.length
+    ? await db.select({
+        addon_name: saleItemAddons.addon_name,
+        qty: saleItemAddons.qty,
+      }).from(saleItemAddons)
+        .innerJoin(saleItems, eq(saleItemAddons.sale_item_id, saleItems.id))
+        .innerJoin(sales, eq(saleItems.sale_id, sales.id))
+        .where(and(...whereClauses))
+    : []
+
+  // ── Group into categories -> items -> sizes ──────────────────────
+  type SizeBucket = Record<string, number> // size_name -> qty
+  type ItemBucket = { item_name: string; sizes: SizeBucket; flat_qty: number }
+  type CategoryBucket = { category_name: string; kind: 'drink' | 'flavor_qty' | 'other'; items: Map<string, ItemBucket> }
+
+  const UNCATEGORIZED = 'Uncategorized / Deleted Items'
+  const categoryMap = new Map<string, CategoryBucket>()
+
+  for (const r of rows) {
+    const catName = r.category_name ?? UNCATEGORIZED
+    const kind = r.category_name ? categoryKind(r.category_name) : 'other'
+    if (!categoryMap.has(catName)) {
+      categoryMap.set(catName, { category_name: catName, kind, items: new Map() })
+    }
+    const cat = categoryMap.get(catName)!
+    if (!cat.items.has(r.item_name)) {
+      cat.items.set(r.item_name, { item_name: r.item_name, sizes: {}, flat_qty: 0 })
+    }
+    const item = cat.items.get(r.item_name)!
+    const sizeLabel = r.size_name ?? 'None'
+    item.sizes[sizeLabel] = (item.sizes[sizeLabel] ?? 0) + r.qty
+    item.flat_qty += r.qty
+  }
+
+  const categoriesOut = [...categoryMap.values()].map(cat => ({
+    category_name: cat.category_name,
+    kind: cat.kind,
+    items: [...cat.items.values()].map(i => ({
+      item_name: i.item_name,
+      sizes: i.sizes,       // e.g. { Large: 5, Regular: 10 } — always present, even for flavor_qty categories
+      flat_qty: i.flat_qty, // ignores variant, used by flavor_qty summary cards
+    })),
+  }))
+
+  // ── Headline summary ──────────────────────────────────────────────
+  // Drink categories: combine literal size_name totals across ALL
+  // 'drink'-kind categories into one Large-cups / Regular-cups total.
+  const sizeTotals: Record<string, number> = {}
+  // flavor_qty categories: one flat total per category (e.g. "Rice Meals").
+  const flavorQtyTotals: Record<string, number> = {}
+
+  for (const cat of categoryMap.values()) {
+    for (const item of cat.items.values()) {
+      if (cat.kind === 'drink') {
+        for (const [size, qty] of Object.entries(item.sizes)) {
+          sizeTotals[size] = (sizeTotals[size] ?? 0) + qty
+        }
+      } else if (cat.kind === 'flavor_qty') {
+        flavorQtyTotals[cat.category_name] = (flavorQtyTotals[cat.category_name] ?? 0) + item.flat_qty
+      }
+    }
+  }
+
+  // ── Add-ons ────────────────────────────────────────────────────────
+  const addonTotals: Record<string, number> = {}
+  for (const a of addonRows) {
+    addonTotals[a.addon_name] = (addonTotals[a.addon_name] ?? 0) + a.qty
+  }
+  const addonsOut = Object.entries(addonTotals)
+    .map(([addon_name, qty]) => ({ addon_name, qty }))
+    .sort((a, b) => b.qty - a.qty)
+
+  return jsonOk({
+    size_totals: sizeTotals,           // e.g. { Large: 19, Regular: 27 }
+    flavor_qty_totals: flavorQtyTotals, // e.g. { "Rice Meals": 14, "Snacks": 9 }
+    categories: categoriesOut,
+    addons: addonsOut,
+  })
+})
+
 app.get('/api/settings', async (c) => {
   const db = c.get('db')
   const list = await db.select().from(systemSettings)

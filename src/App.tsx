@@ -31,6 +31,7 @@ import {
   useUpdateMenuItem, useDeleteMenuItem, useCreateCategory, useUpdateCategory,
   useUpdateAddon, useDeleteAddon, useCreateAddon, useEditSale,
   useDeleteCategory, useReorderCategory, useDetailedSalesReport,
+  useSalesByItemReport,
 } from './api';
 import {
   printReceipt,
@@ -3078,7 +3079,133 @@ function EditSaleModal({ sale, onClose, onDone }: { sale: SaleDetail; onClose: (
 }
 
 // ─── Sales Page ────────────────────────────────────────────────
+// NEW: category dot colors for the Sales by Item report. Falls back to
+// gray for any category name not listed here — this is purely cosmetic
+// (list colors don't affect the numbers), so an unlisted category still
+// reports correctly, it just renders with a neutral dot.
+const SALES_BY_ITEM_CATEGORY_DOTS: Record<string, string> = {
+  'Shakes': '#E8A000',
+  'Milktea': '#3B6D11',
+  'Cheesecake Milktea': '#993556',
+  'Fruit Soda': '#534AB7',
+  'Snacks': '#185FA5',
+  'Rice Meals': '#BA7517',
+  'Add-ons': '#993556',
+};
+
+const SalesByItemPanel = memo(function SalesByItemPanel({
+  dateFrom, dateTo,
+}: { dateFrom: string; dateTo: string }) {
+  const { data: report, isLoading } = useSalesByItemReport({ date_from: dateFrom, date_to: dateTo });
+
+  if (isLoading) {
+    return (
+      <div className="p-4 space-y-3">
+        {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 shimmer rounded-2xl" />)}
+      </div>
+    );
+  }
+
+  if (!report || (!report.categories.length && !report.addons.length)) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 text-center">
+        <Package size={36} className="text-gray-200 mb-3" />
+        <p className="text-gray-400 text-sm font-medium">No sales found for this range</p>
+      </div>
+    );
+  }
+
+  const sizeTotalEntries = Object.entries(report.size_totals);
+  const flavorQtyEntries = Object.entries(report.flavor_qty_totals);
+
+  return (
+    <div className="p-4 max-w-3xl mx-auto flex flex-col gap-4">
+      {(sizeTotalEntries.length > 0 || flavorQtyEntries.length > 0) && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {sizeTotalEntries.map(([size, qty]) => (
+            <KpiCard key={size} icon={<Coffee size={18} />} label={`${size} cups`} value={String(qty)} color="blue" />
+          ))}
+          {flavorQtyEntries.map(([catName, qty]) => (
+            <KpiCard key={catName} icon={<Package size={18} />} label={`${catName} sold`} value={String(qty)} color="yellow" />
+          ))}
+        </div>
+      )}
+
+      {report.categories.map(cat => {
+        // Column set: union of every size/variant label seen across this
+        // category's items — so partial menus (e.g. one item missing a
+        // size) still line up as columns, with a dash for zero sales.
+        const allLabels = [...new Set(cat.items.flatMap(i => Object.keys(i.sizes)))];
+        const showColumns = cat.kind !== 'flavor_qty';
+        const dotColor = SALES_BY_ITEM_CATEGORY_DOTS[cat.category_name] ?? '#9CA3AF';
+
+        return (
+          <div key={cat.category_name} className="bg-white border border-gray-150 rounded-2xl p-4 shadow-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: dotColor }} />
+              <h3 className="text-sm font-800 text-gray-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+                {cat.category_name}
+              </h3>
+            </div>
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="text-gray-400 text-xs">
+                  <th className="text-left font-semibold py-1.5">Item</th>
+                  {showColumns
+                    ? allLabels.map(label => (
+                        <th key={label} className="text-right font-semibold py-1.5 pl-3">{label}</th>
+                      ))
+                    : <th className="text-right font-semibold py-1.5 pl-3">Total</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {cat.items.map(item => (
+                  <tr key={item.item_name} className="border-t border-gray-100">
+                    <td className="py-2 text-gray-800 font-medium">{item.item_name}</td>
+                    {showColumns
+                      ? allLabels.map(label => {
+                          const qty = item.sizes[label];
+                          return (
+                            <td key={label} className="text-right py-2 pl-3">
+                              {qty ? <span className="font-700">{qty}</span> : <span className="text-gray-300">—</span>}
+                            </td>
+                          );
+                        })
+                      : <td className="text-right py-2 pl-3 font-700">{item.flat_qty}</td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+
+      {report.addons.length > 0 && (
+        <div className="bg-white border border-gray-150 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: SALES_BY_ITEM_CATEGORY_DOTS['Add-ons'] }} />
+            <h3 className="text-sm font-800 text-gray-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+              Add-ons sold
+            </h3>
+          </div>
+          <table className="w-full text-sm border-collapse">
+            <tbody>
+              {report.addons.map(a => (
+                <tr key={a.addon_name} className="border-t border-gray-100">
+                  <td className="py-2 text-gray-800 font-medium">{a.addon_name}</td>
+                  <td className="text-right py-2 font-700">{a.qty}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+});
+
 function SalesPage() {
+  const [salesTab, setSalesTab] = useState<'receipts' | 'by_item'>('receipts');
   const openPinModal = useUIStore(s => s.openPinModal);
   const [dateFrom, setDateFrom] = useState(getManilaDateString());
   const [dateTo, setDateTo] = useState(getManilaDateString());
@@ -3149,22 +3276,52 @@ function SalesPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--surface-page)' }}>
+      <div className="px-4 pt-2 bg-white border-b border-gray-150 shrink-0 flex gap-1">
+        <button
+          onClick={() => setSalesTab('receipts')}
+          className={clsx(
+            'px-3 py-2 text-sm font-700 border-b-2 transition-colors',
+            salesTab === 'receipts' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'
+          )}
+        >
+          Receipts
+        </button>
+        <button
+          onClick={() => setSalesTab('by_item')}
+          className={clsx(
+            'px-3 py-2 text-sm font-700 border-b-2 transition-colors',
+            salesTab === 'by_item' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'
+          )}
+        >
+          Sales by item
+        </button>
+      </div>
+
       <div className="px-4 py-3 bg-white border-b border-gray-150 shrink-0"
         style={{ boxShadow: '0 1px 0 rgba(0,0,0,0.04)' }}>
         <div className="flex flex-wrap gap-2 items-end">
           <Input label="From" type="date" value={dateFrom} onChange={setDateFrom} className="w-36" />
           <Input label="To" type="date" value={dateTo} onChange={setDateTo} className="w-36" />
-          <Select label="Status" value={statusFilter} onChange={setStatusFilter}
-            options={[
-              { value: '', label: 'All Status' },
-              { value: 'completed', label: 'Completed' },
-              { value: 'voided', label: 'Voided' },
-              { value: 'refunded', label: 'Refunded' },
-            ]} className="w-36" />
-          <Input label="Receipt #" value={receiptQ} onChange={setReceiptQ} placeholder="MW-..." className="w-40" />
+          {salesTab === 'receipts' && (
+            <>
+              <Select label="Status" value={statusFilter} onChange={setStatusFilter}
+                options={[
+                  { value: '', label: 'All Status' },
+                  { value: 'completed', label: 'Completed' },
+                  { value: 'voided', label: 'Voided' },
+                  { value: 'refunded', label: 'Refunded' },
+                ]} className="w-36" />
+              <Input label="Receipt #" value={receiptQ} onChange={setReceiptQ} placeholder="MW-..." className="w-40" />
+            </>
+          )}
         </div>
       </div>
 
+      {salesTab === 'by_item' ? (
+        <div className="flex-1 overflow-y-auto scrollable">
+          <SalesByItemPanel dateFrom={dateFrom} dateTo={dateTo} />
+        </div>
+      ) : (
       <div className="flex flex-1 overflow-hidden">
         <div className="flex flex-col flex-1 overflow-hidden">
           {sales && (
@@ -3303,6 +3460,7 @@ function SalesPage() {
           </div>
         )}
       </div>
+      )}
 
       {actionModal && saleDetail && (
         <PartialActionModal sale={saleDetail} action={actionModal.type}
