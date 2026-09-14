@@ -1646,9 +1646,20 @@ app.get('/api/reports/sales-detailed', async (c) => {
 // This mapping is intentionally explicit rather than guessed from data,
 // because nothing in the schema distinguishes "size" text from "flavor"
 // text — see CATEGORY_KIND_OVERRIDES below to adjust it.
+//
+// The "Add-ons" menu category is a special case: its size_name column
+// holds addon names (Nata, Pearl, ...), not real cup sizes. Left as the
+// 'drink' default, those addon names get summed straight into
+// sizeTotals and show up as a bogus "NATA CUPS" headline card next to
+// Regular/Large. It's unrelated to the separate sale_item_addons table
+// (addons attached to other drinks) — this is standalone Add-ons items
+// sold on their own — so it still deserves its own per-item detail rows,
+// it just shouldn't feed the drink-cups headline. 'other' gives it a
+// detail row with no headline card, same as Uncategorized items.
 const CATEGORY_KIND_OVERRIDES: Record<string, 'drink' | 'flavor_qty' | 'other'> = {
   'Rice Meals': 'flavor_qty',
   'Snacks': 'flavor_qty',
+  'Add-ons': 'other',
 }
 function categoryKind(categoryName: string): 'drink' | 'flavor_qty' | 'other' {
   return CATEGORY_KIND_OVERRIDES[categoryName] ?? 'drink'

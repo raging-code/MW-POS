@@ -2771,8 +2771,9 @@ function ShiftModal({ shift, onClose }: { shift: Shift | null; onClose: () => vo
         open={showAnyPin}
         onClose={() => { setShowAnyPin(false); setPendingAction(null); }}
         onSuccess={executeAction}
-        title={pendingAction === 'close' ? '🔒 Close Shift' : pendingAction === 'drop' ? '🔒 Cash Drop' : '🔒 Shift Action'}
-        description="Enter your PIN to authorize this action."
+        title={pendingAction === 'close' ? '🔒 Close Shift (Admin Required)' : pendingAction === 'drop' ? '🔒 Cash Drop' : '🔒 Shift Action'}
+        description={pendingAction === 'close' ? 'Only admins can close a shift. Enter an admin PIN to continue.' : 'Enter your PIN to authorize this action.'}
+        required_role={pendingAction === 'close' ? 'admin' : undefined}
       />
     </>
   );
