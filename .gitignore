@@ -32,4 +32,5 @@ worker/.wrangler
 patch-*.mjs
 backup.sql
 *.sql.bak
-worker/*.sql
+
+backup*.sql
