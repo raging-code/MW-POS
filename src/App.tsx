@@ -3107,7 +3107,7 @@ const SalesByItemPanel = memo(function SalesByItemPanel({
     );
   }
 
-  if (!report || (!report.categories.length && !report.addons.length)) {
+  if (!report || (!report.categories.length && !report.addons.length && !(report.standalone_addons?.length))) {
     return (
       <div className="flex flex-col items-center justify-center h-48 text-center">
         <Package size={36} className="text-gray-200 mb-3" />
@@ -3126,6 +3126,9 @@ const SalesByItemPanel = memo(function SalesByItemPanel({
           {sizeTotalEntries.map(([size, qty]) => (
             <KpiCard key={size} icon={<Coffee size={18} />} label={`${size} cups`} value={String(qty)} color="blue" />
           ))}
+          {Object.entries(report.unit_totals ?? {}).filter(([k, u]) => u !== report.flavor_qty_totals[k]).map(([catName, units]) => (
+            <KpiCard key={catName + '-units'} icon={<Package size={18} />} label={catName + ' units used'} value={String(units)} color="yellow" />
+          ))}
           {flavorQtyEntries.map(([catName, qty]) => (
             <KpiCard key={catName} icon={<Package size={18} />} label={`${catName} sold`} value={String(qty)} color="yellow" />
           ))}
@@ -3138,6 +3141,7 @@ const SalesByItemPanel = memo(function SalesByItemPanel({
         // size) still line up as columns, with a dash for zero sales.
         const allLabels = [...new Set(cat.items.flatMap(i => Object.keys(i.sizes)))];
         const showColumns = cat.kind !== 'flavor_qty';
+        const showUnits = cat.items.some(i => (i.units ?? i.flat_qty) !== i.flat_qty);
         const dotColor = SALES_BY_ITEM_CATEGORY_DOTS[cat.category_name] ?? '#9CA3AF';
 
         return (
@@ -3157,6 +3161,7 @@ const SalesByItemPanel = memo(function SalesByItemPanel({
                         <th key={label} className="text-right font-semibold py-1.5 pl-3">{label}</th>
                       ))
                     : <th className="text-right font-semibold py-1.5 pl-3">Total</th>}
+                  {showUnits && <th className="text-right font-semibold py-1.5 pl-3">Units</th>}
                 </tr>
               </thead>
               <tbody>
@@ -3173,6 +3178,7 @@ const SalesByItemPanel = memo(function SalesByItemPanel({
                           );
                         })
                       : <td className="text-right py-2 pl-3 font-700">{item.flat_qty}</td>}
+                    {showUnits && <td className="text-right py-2 pl-3 font-700">{item.units ?? item.flat_qty}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -3180,6 +3186,27 @@ const SalesByItemPanel = memo(function SalesByItemPanel({
           </div>
         );
       })}
+
+      {(report.standalone_addons?.length ?? 0) > 0 && (
+        <div className="bg-white border border-gray-150 rounded-2xl p-4 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="w-2 h-2 rounded-full shrink-0" style={{ background: SALES_BY_ITEM_CATEGORY_DOTS['Add-ons'] }} />
+            <h3 className="text-sm font-800 text-gray-800" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+              Add-ons sold on their own
+            </h3>
+          </div>
+          <table className="w-full text-sm border-collapse">
+            <tbody>
+              {report.standalone_addons!.map(a => (
+                <tr key={a.addon_name} className="border-t border-gray-100">
+                  <td className="py-2 text-gray-800 font-medium">{a.addon_name}</td>
+                  <td className="text-right py-2 font-700">{a.qty}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {report.addons.length > 0 && (
         <div className="bg-white border border-gray-150 rounded-2xl p-4 shadow-sm">
@@ -4035,7 +4062,7 @@ function AdminMenuPage() {
   const [showAddItem, setShowAddItem] = useState(false);
   const [showAddAddon, setShowAddAddon] = useState(false);
   const [editItem, setEditItem] = useState<MenuItem | null>(null);
-  const [newItem, setNewItem] = useState({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }], addon_ids: [] as string[] });
+  const [newItem, setNewItem] = useState({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '', option_kind: 'size', stock_units: '1' }], addon_ids: [] as string[] });
   // CHANGED: category_ids (plural) — an add-on can be assigned to multiple categories
   const [newAddon, setNewAddon] = useState({ name: '', price: '', category_ids: [] as string[] });
 
@@ -4062,12 +4089,12 @@ function AdminMenuPage() {
   }, [createCategory, newCatName, newCatAddons, categories.length]);
 
   const handleAddItem = useCallback(async () => {
-    const sizes = newItem.sizes.filter(s => s.name && s.price).map(s => ({ name: s.name, price: parseFloat(s.price) }));
+    const sizes = newItem.sizes.filter(s => s.name && s.price).map(s => ({ name: s.name, price: parseFloat(s.price), option_kind: s.option_kind, stock_units: parseFloat(s.stock_units) || 1 }));
     if (!newItem.name || !sizes.length) return;
     // FIX [G]: catch API errors so the form stays open and user sees the problem
     try {
       await createItem.mutateAsync({ name: newItem.name, category_id: newItem.category_id || undefined, sizes, addon_ids: newItem.addon_ids });
-      setNewItem({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '' }], addon_ids: [] });
+      setNewItem({ name: '', category_id: '', sizes: [{ name: 'Regular', price: '', option_kind: 'size', stock_units: '1' }], addon_ids: [] });
       setShowAddItem(false);
       toast('Item added');
     } catch (e: unknown) {
@@ -4090,7 +4117,7 @@ function AdminMenuPage() {
 
   const [editForm, setEditForm] = useState<{
     name: string; category_id: string;
-    sizes: { id?: string; name: string; price: string }[];
+    sizes: { id?: string; name: string; price: string; option_kind: string; stock_units: string }[];
     addon_ids: string[];
   } | null>(null);
 
@@ -4098,14 +4125,14 @@ function AdminMenuPage() {
     setEditItem(item);
     setEditForm({
       name: item.name, category_id: item.category_id ?? '',
-      sizes: item.sizes.map(s => ({ id: s.id, name: s.name, price: String(s.price) })),
+      sizes: item.sizes.map(s => ({ id: s.id, name: s.name, price: String(s.price), option_kind: s.option_kind ?? 'size', stock_units: String(s.stock_units ?? 1) })),
       addon_ids: item.addons.map(a => a.id),
     });
   }, []);
 
   const handleEditItem = useCallback(async () => {
     if (!editItem || !editForm) return;
-    const sizes = editForm.sizes.filter(s => s.name && s.price).map(s => ({ ...(s.id ? { id: s.id } : {}), name: s.name, price: parseFloat(s.price) }));
+    const sizes = editForm.sizes.filter(s => s.name && s.price).map(s => ({ ...(s.id ? { id: s.id } : {}), name: s.name, price: parseFloat(s.price), option_kind: s.option_kind, stock_units: parseFloat(s.stock_units) || 1 }));
     if (!editForm.name || !sizes.length) return;
     // FIX [I]: keep form open and show error instead of silently failing
     try {
@@ -4361,6 +4388,16 @@ function AdminMenuPage() {
                 <Input type="number" value={s.price}
                   onChange={v => setNewItem(p => ({ ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, price: v } : sz) }))}
                   placeholder="Price" className="w-24" />
+                <select value={s.option_kind} title="What this option is: a real size, a flavor/variant, or an add-on"
+                  onChange={e => setNewItem(p => ({ ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, option_kind: e.target.value } : sz) }))}
+                  className="w-24 h-10 rounded-xl border border-gray-200 bg-white text-xs px-1.5">
+                  <option value="size">Size</option>
+                  <option value="variant">Variant</option>
+                  <option value="addon">Add-on</option>
+                </select>
+                <Input type="number" value={s.stock_units}
+                  onChange={v => setNewItem(p => ({ ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, stock_units: v } : sz) }))}
+                  placeholder="Units" className="w-16" />
                 {newItem.sizes.length > 1 && (
                   <button onClick={() => setNewItem(p => ({ ...p, sizes: p.sizes.filter((_, j) => j !== i) }))}
                     className="text-gray-400 hover:text-red-500 mt-2.5 p-1.5 rounded-lg hover:bg-red-50 transition-colors">
@@ -4369,7 +4406,7 @@ function AdminMenuPage() {
                 )}
               </div>
             ))}
-            <Btn size="sm" variant="ghost" onClick={() => setNewItem(p => ({ ...p, sizes: [...p.sizes, { name: '', price: '' }] }))}>
+            <Btn size="sm" variant="ghost" onClick={() => setNewItem(p => ({ ...p, sizes: [...p.sizes, { name: '', price: '', option_kind: 'size', stock_units: '1' }] }))}>
               <Plus size={12} /> Add Size
             </Btn>
           </div>
@@ -4433,7 +4470,17 @@ function AdminMenuPage() {
                   <Input type="number" value={s.price}
                     onChange={v => setEditForm(p => p ? { ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, price: v } : sz) } : null)}
                     placeholder="Price" className="w-24" />
-                  {editForm.sizes.length > 1 && (
+                  <select value={s.option_kind} title="What this option is: a real size, a flavor/variant, or an add-on"
+                  onChange={e => setEditForm(p => p ? { ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, option_kind: e.target.value } : sz) } : null)}
+                  className="w-24 h-10 rounded-xl border border-gray-200 bg-white text-xs px-1.5">
+                  <option value="size">Size</option>
+                  <option value="variant">Variant</option>
+                  <option value="addon">Add-on</option>
+                </select>
+                <Input type="number" value={s.stock_units}
+                  onChange={v => setEditForm(p => p ? { ...p, sizes: p.sizes.map((sz, j) => j === i ? { ...sz, stock_units: v } : sz) } : null)}
+                  placeholder="Units" className="w-16" />
+                {editForm.sizes.length > 1 && (
                     <button onClick={() => setEditForm(p => p ? { ...p, sizes: p.sizes.filter((_, j) => j !== i) } : null)}
                       className="text-gray-400 hover:text-red-500 mt-2.5 p-1.5 rounded-lg hover:bg-red-50 transition-colors">
                       <X size={14} />
@@ -4441,7 +4488,7 @@ function AdminMenuPage() {
                   )}
                 </div>
               ))}
-              <Btn size="sm" variant="ghost" onClick={() => setEditForm(p => p ? { ...p, sizes: [...p.sizes, { name: '', price: '' }] } : null)}>
+              <Btn size="sm" variant="ghost" onClick={() => setEditForm(p => p ? { ...p, sizes: [...p.sizes, { name: '', price: '', option_kind: 'size', stock_units: '1' }] } : null)}>
                 <Plus size={12} /> Add Size
               </Btn>
             </div>

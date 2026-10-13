@@ -180,7 +180,7 @@ export function useCreateMenuItem() {
   const qc = useQueryClient()
   return useMutation({
     // NEW: addon_ids — which of the category's add-ons apply to this item
-    mutationFn: (body: { name: string; category_id?: string; sizes: { name: string; price: number }[]; addon_ids?: string[] }) =>
+    mutationFn: (body: { name: string; category_id?: string; sizes: { name: string; price: number; option_kind?: string; stock_units?: number }[]; addon_ids?: string[] }) =>
       api.post('/menu/items', body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })
@@ -192,7 +192,7 @@ export function useUpdateMenuItem() {
   return useMutation({
     // Bug #11 fix: category_id can be null to unassign a category from an item.
     // NEW: addon_ids — replaces this item's assigned add-ons when provided.
-    mutationFn: ({ id, ...body }: { id: string; name?: string; category_id?: string | null; is_active?: boolean; sizes?: { name: string; price: number }[]; addon_ids?: string[] }) =>
+    mutationFn: ({ id, ...body }: { id: string; name?: string; category_id?: string | null; is_active?: boolean; sizes?: { name: string; price: number; option_kind?: string; stock_units?: number }[]; addon_ids?: string[] }) =>
       api.put(`/menu/items/${id}`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['menu'] }),
   })
@@ -531,6 +531,7 @@ export interface SalesByItemCategory {
     item_name: string;
     sizes: Record<string, number>;
     flat_qty: number;
+    units?: number; // physical units used (qty x stock_units)
   }[];
 }
 export interface SalesByItemReport {
@@ -538,6 +539,8 @@ export interface SalesByItemReport {
   flavor_qty_totals: Record<string, number>;
   categories: SalesByItemCategory[];
   addons: { addon_name: string; qty: number }[];
+  unit_totals?: Record<string, number>;
+  standalone_addons?: { addon_name: string; qty: number }[];
 }
 
 export function useSalesByItemReport(params?: { date_from?: string; date_to?: string }) {

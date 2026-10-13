@@ -11,7 +11,7 @@ import { drizzle, DrizzleD1Database } from 'drizzle-orm/d1'
 import {
   sqliteTable, text, integer, real, primaryKey,
 } from 'drizzle-orm/sqlite-core'
-import { eq, and, desc, asc, gte, lte, sql, not, or, inArray } from 'drizzle-orm'
+import { eq, and, desc, asc, gte, lte, sql, not, or, inArray, type SQL } from 'drizzle-orm'
 
 // ============================================================
 // SECTION 2: ENV TYPE
@@ -80,6 +80,9 @@ const itemSizes = sqliteTable('item_sizes', {
   item_id: text('item_id').notNull().references(() => menuItems.id),
   name:    text('name').notNull(),
   price:   real('price').notNull(),
+  // [proper-fix] what this option means, and physical units used per 1 order
+  option_kind: text('option_kind', { enum: ['size', 'variant', 'addon'] }).notNull().default('size'),
+  stock_units: real('stock_units').notNull().default(1),
 })
 
 const addons = sqliteTable('addons', {
@@ -171,6 +174,10 @@ const saleItems = sqliteTable('sale_items', {
   discount_amount: real('discount_amount').notNull().default(0),
   addons_total:    real('addons_total').notNull().default(0),
   final_price:     real('final_price').notNull(),
+  // [proper-fix] snapshot at sale time so menu edits can't shift old reports
+  category_name:   text('category_name'),
+  option_kind:     text('option_kind', { enum: ['size', 'variant', 'addon'] }),
+  stock_units:     real('stock_units'),
 })
 
 const saleItemAddons = sqliteTable('sale_item_addons', {
@@ -707,19 +714,33 @@ app.delete('/api/menu/categories/:id', async (c) => {
   return jsonOk({ ok: true })
 })
 
+// [proper-fix] size means size; variants/add-ons are their own kind
+const OPTION_KINDS = ['size', 'variant', 'addon'] as const
+type OptionKind = typeof OPTION_KINDS[number]
+function normOptionKind(k: unknown): OptionKind {
+  return (OPTION_KINDS as readonly string[]).includes(k as string) ? (k as OptionKind) : 'size'
+}
+function normStockUnits(u: unknown): number {
+  const n = typeof u === 'number' ? u : parseFloat(String(u))
+  return Number.isFinite(n) && n > 0 ? n : 1
+}
+
 app.post('/api/menu/items', async (c) => {
   const actor = c.get('user')
   if (actor.role !== 'admin') return jsonErr('Admin only', 403)
   const db = c.get('db')
   const body = await c.req.json<{
     name: string; category_id?: string;
-    sizes: { name: string; price: number }[];
+    sizes: { name: string; price: number; option_kind?: string; stock_units?: number }[];
     addon_ids?: string[];
   }>()
   const id = uid()
   await db.insert(menuItems).values({ id, name: body.name, category_id: body.category_id, created_at: nowISO() })
   if (body.sizes?.length) {
-    await db.insert(itemSizes).values(body.sizes.map(s => ({ id: uid(), item_id: id, name: s.name, price: s.price })))
+    await db.insert(itemSizes).values(body.sizes.map(s => ({
+      id: uid(), item_id: id, name: s.name, price: s.price,
+      option_kind: normOptionKind(s.option_kind), stock_units: normStockUnits(s.stock_units),
+    })))
   }
   if (body.addon_ids?.length) {
     await db.insert(itemAddons).values(body.addon_ids.map(aid => ({ item_id: id, addon_id: aid })))
@@ -735,7 +756,7 @@ app.put('/api/menu/items/:id', async (c) => {
   const id = c.req.param('id')
   const body = await c.req.json<{
     name?: string; category_id?: string | null; is_active?: boolean;
-    sizes?: { id?: string; name: string; price: number }[];
+    sizes?: { id?: string; name: string; price: number; option_kind?: string; stock_units?: number }[];
     addon_ids?: string[];
   }>()
   const old = await db.select().from(menuItems).where(eq(menuItems.id, id)).get()
@@ -748,8 +769,18 @@ app.put('/api/menu/items/:id', async (c) => {
   if (body.category_id !== undefined) itemUpdateFields.category_id = body.category_id // null is valid here
   await db.update(menuItems).set(itemUpdateFields).where(eq(menuItems.id, id))
   if (body.sizes) {
+    const existingSizes = await db.select().from(itemSizes).where(eq(itemSizes.item_id, id))
+    const existingSizeById = new Map(existingSizes.map(s => [s.id, s]))
     await db.delete(itemSizes).where(eq(itemSizes.item_id, id))
-    await db.insert(itemSizes).values(body.sizes.map(s => ({ id: s.id ?? uid(), item_id: id, name: s.name, price: s.price })))
+    await db.insert(itemSizes).values(body.sizes.map(s => {
+      // Older app versions don't send option_kind/stock_units: keep what is stored.
+      const prev = s.id ? existingSizeById.get(s.id) : undefined
+      return {
+        id: s.id ?? uid(), item_id: id, name: s.name, price: s.price,
+        option_kind: normOptionKind(s.option_kind ?? prev?.option_kind),
+        stock_units: normStockUnits(s.stock_units ?? prev?.stock_units),
+      }
+    }))
   }
   if (body.addon_ids !== undefined) {
     await db.delete(itemAddons).where(eq(itemAddons.item_id, id))
@@ -1065,15 +1096,33 @@ app.post('/api/sales', async (c) => {
   // each ordered item's category up fresh from the DB and check the flag.
   const orderedItemIds = [...new Set(body.items.map(i => i.item_id))]
   const itemCategoryRows = orderedItemIds.length
-    ? await db.select({ itemId: menuItems.id, discountDisabled: categories.discount_disabled })
+    ? await db.select({ itemId: menuItems.id, discountDisabled: categories.discount_disabled, categoryName: categories.name })
         .from(menuItems)
         .leftJoin(categories, eq(menuItems.category_id, categories.id))
         .where(inArray(menuItems.id, orderedItemIds))
     : []
   const discountDisabledByItemId = new Map(itemCategoryRows.map(r => [r.itemId, !!r.discountDisabled]))
+  const categoryNameByItemId = new Map(itemCategoryRows.map(r => [r.itemId, r.categoryName ?? null]))
 
   const saleItemRows: typeof saleItems.$inferInsert[] = []
   const addonRows: typeof saleItemAddons.$inferInsert[] = []
+
+  // [proper-fix] Snapshot category / option kind / stock units onto each line.
+  // Resolved server-side so old app versions (which only send size_name) work.
+  const sizeRowsForOrder = orderedItemIds.length
+    ? await db.select().from(itemSizes).where(inArray(itemSizes.item_id, orderedItemIds))
+    : []
+  const snapshotFor = (item: CheckoutItem) => {
+    const named = sizeRowsForOrder.filter(s =>
+      s.item_id === item.item_id && (item.size_name == null || s.name === item.size_name))
+    // Duplicate names (or no size sent): disambiguate by price, never guess.
+    const match = named.length === 1 ? named[0] : (named.find(s => s.price === item.base_price) ?? null)
+    return {
+      category_name: categoryNameByItemId.get(item.item_id) ?? null,
+      option_kind: match?.option_kind ?? null,
+      stock_units: match?.stock_units ?? 1,
+    }
+  }
 
   for (const item of body.items) {
     const addonsTotal = item.addons.reduce((s, a) => s + a.addon_price * a.qty, 0)
@@ -1107,6 +1156,7 @@ app.post('/api/sales', async (c) => {
       item_id_ref: item.item_id,
       item_name: item.item_name,
       size_name: item.size_name,
+      ...snapshotFor(item), // [proper-fix] category_name, option_kind, stock_units
       base_price: item.base_price,
       qty: item.qty,
       discount_type: item.discount_type,
@@ -1199,25 +1249,25 @@ app.get('/api/sales', async (c) => {
     is_reprinted: sales.is_reprinted,
   }).from(sales)
 
-  // FIX 3: Only exclude soft_deleted when no explicit status filter is given.
-  //         When ?status=soft_deleted is passed we WANT those rows.
-  let query = (
+  // [proper-fix] Drizzle's dynamic .where() REPLACES the previous clause, so
+  // chaining dropped filters (e.g. date_from was lost whenever date_to was set).
+  // Collect every condition and apply ONE .where(and(...)).
+  // Only exclude soft_deleted when no explicit status filter is given.
+  const conditions: SQL[] = [
     status
-      ? baseSelect.where(eq(sales.status, status as typeof sales.status._.data))
-      : baseSelect.where(not(eq(sales.status, 'soft_deleted')))
-  ).orderBy(desc(sales.created_at)).$dynamic()
-
+      ? eq(sales.status, status as typeof sales.status._.data)
+      : not(eq(sales.status, 'soft_deleted')),
+  ]
   try {
-    if (date_from) query = query.where(gte(sales.created_at, manilaToUTC(date_from, 'start')))
-    if (date_to)   query = query.where(lte(sales.created_at, manilaToUTC(date_to,   'end')))
+    if (date_from) conditions.push(gte(sales.created_at, manilaToUTC(date_from, 'start')))
+    if (date_to)   conditions.push(lte(sales.created_at, manilaToUTC(date_to,   'end')))
   } catch (err) {
     return jsonErr(err instanceof Error ? err.message : 'Invalid date parameter', 400)
   }
-  // FIX 2: apply order_type filter (was parsed but discarded)
-  if (order_type) query = query.where(eq(sales.order_type, order_type as typeof sales.order_type._.data))
-  if (receipt)   query = query.where(eq(sales.receipt_number, receipt))
+  if (order_type) conditions.push(eq(sales.order_type, order_type as typeof sales.order_type._.data))
+  if (receipt)    conditions.push(eq(sales.receipt_number, receipt))
 
-  // FIX 2: payment_method filter — requires a join with sale_payments
+  // payment_method filter — requires a lookup in sale_payments
   if (payment_method) {
     const matchingSaleIds = await db
       .selectDistinct({ sale_id: salePayments.sale_id })
@@ -1225,10 +1275,10 @@ app.get('/api/sales', async (c) => {
       .where(eq(salePayments.method, payment_method as typeof salePayments.method._.data))
     const ids = matchingSaleIds.map(r => r.sale_id)
     if (!ids.length) return jsonOk([])
-    query = query.where(sql`${sales.id} IN (${sql.join(ids.map(i => sql`${i}`), sql`,`)})`)
+    conditions.push(inArray(sales.id, ids))
   }
 
-  const list = await query
+  const list = await baseSelect.where(and(...conditions)).orderBy(desc(sales.created_at))
   return jsonOk(list)
 })
 
@@ -1497,17 +1547,18 @@ app.get('/api/reports/sales', async (c) => {
     subtotal: sales.subtotal, status: sales.status,
     sale_type: sales.sale_type, order_type: sales.order_type,
     created_at: sales.created_at, cashier_id: sales.cashier_id,
-  }).from(sales).where(
-    not(eq(sales.status, 'soft_deleted'))
-  ).$dynamic()
+  }).from(sales).$dynamic()
 
+  // [proper-fix] one combined where(): chained .where() calls replace each other
+  const salesConditions: SQL[] = [not(eq(sales.status, 'soft_deleted'))]
   try {
-    if (date_from) salesQuery = salesQuery.where(gte(sales.created_at, manilaToUTC(date_from, 'start')))
-    if (date_to) salesQuery = salesQuery.where(lte(sales.created_at, manilaToUTC(date_to, 'end')))
+    if (date_from) salesConditions.push(gte(sales.created_at, manilaToUTC(date_from, 'start')))
+    if (date_to) salesConditions.push(lte(sales.created_at, manilaToUTC(date_to, 'end')))
   } catch (err) {
     return jsonErr(err instanceof Error ? err.message : 'Invalid date parameter', 400)
   }
 
+  salesQuery = salesQuery.where(and(...salesConditions))
   const salesList = await salesQuery
   const completedSales = salesList.filter(s => s.status === 'completed')
   const totalRevenue = completedSales.reduce((s, sale) => s + sale.total, 0)
@@ -1624,46 +1675,25 @@ app.get('/api/reports/sales-detailed', async (c) => {
   })
 })
 
-// NEW: GET /api/reports/sales-by-item — quantities sold per item/size,
-// per add-on, and category-level summaries (cups by size, rice meals,
-// snacks). Only 'completed' sales count, matching /reports/sales and
-// /reports/sales-detailed. Category is resolved from the CURRENT menu
-// (item_id_ref -> menu_items -> categories); items whose menu record
-// was deleted, or that were never linked, fall into "Uncategorized /
-// Deleted Items" so old sales are never silently dropped.
+// [proper-fix] GET /api/reports/sales-by-item
+// Reports orders rung up (qty) AND physical units (qty x stock_units) per item.
+// What a size_name means comes from the data (sale_items.option_kind, set from
+// item_sizes.option_kind when the sale was made), not from category names.
+// Category is the snapshot taken at sale time, falling back to the live menu
+// for sales made before the snapshot existed. Only 'completed' sales count.
 //
-// Category "kind" controls how each category's numbers roll into the
-// headline summary cards:
-//   'drink'      — sizes are real sizes (Regular/Large); summed by the
-//                  literal size_name text, combined across every drink
-//                  category into one Large-cups / Regular-cups total.
-//   'flavor_qty' — the size_name column actually holds a flavor/sauce
-//                  variant (e.g. Rice Meals' C/SBQ/HGT/G/SBF/S&S/None),
-//                  not a size. Variant is collapsed away for the
-//                  headline number; only a flat item-level qty is kept.
-//   'other'      — no headline card; still shown in the per-item detail.
-//
-// This mapping is intentionally explicit rather than guessed from data,
-// because nothing in the schema distinguishes "size" text from "flavor"
-// text — see CATEGORY_KIND_OVERRIDES below to adjust it.
-//
-// The "Add-ons" menu category is a special case: its size_name column
-// holds addon names (Nata, Pearl, ...), not real cup sizes. Left as the
-// 'drink' default, those addon names get summed straight into
-// sizeTotals and show up as a bogus "NATA CUPS" headline card next to
-// Regular/Large. It's unrelated to the separate sale_item_addons table
-// (addons attached to other drinks) — this is standalone Add-ons items
-// sold on their own — so it still deserves its own per-item detail rows,
-// it just shouldn't feed the drink-cups headline. 'other' gives it a
-// detail row with no headline card, same as Uncategorized items.
-const CATEGORY_KIND_OVERRIDES: Record<string, 'drink' | 'flavor_qty' | 'other'> = {
-  'Rice Meals': 'flavor_qty',
-  'Snacks': 'flavor_qty',
-  'Add-ons': 'other',
+//   option_kind 'size'    -> drink: summed by size label into size_totals
+//   option_kind 'variant' -> flavor/variant: flat per-item qty + units
+//   option_kind 'addon'   -> standalone add-on sold on its own -> standalone_addons
+//   option_kind null      -> unknown (menu item deleted): "Uncategorized / Deleted Items"
+type ReportKind = 'drink' | 'flavor_qty' | 'other'
+function reportKind(optionKind: string | null, hasCategory: boolean): ReportKind {
+  if (optionKind === 'size') return 'drink'
+  if (optionKind === 'variant') return 'flavor_qty'
+  if (optionKind === 'addon') return 'other'
+  return hasCategory ? 'drink' : 'other'
 }
-function categoryKind(categoryName: string): 'drink' | 'flavor_qty' | 'other' {
-  return CATEGORY_KIND_OVERRIDES[categoryName] ?? 'drink'
-}
+const round2 = (n: number) => Math.round(n * 100) / 100
 
 app.get('/api/reports/sales-by-item', async (c) => {
   const db = c.get('db')
@@ -1679,26 +1709,26 @@ app.get('/api/reports/sales-by-item', async (c) => {
     return jsonErr(err instanceof Error ? err.message : 'Invalid date parameter', 400)
   }
 
-  // Only completed sales within range, joined down to their line items.
   const whereClauses = [eq(sales.status, 'completed')]
   if (from) whereClauses.push(gte(sales.created_at, from))
   if (to) whereClauses.push(lte(sales.created_at, to))
 
   const rows = await db.select({
     sale_item_id: saleItems.id,
-    item_id_ref: saleItems.item_id_ref,
     item_name: saleItems.item_name,
     size_name: saleItems.size_name,
     qty: saleItems.qty,
-    category_name: categories.name,
+    snap_category: saleItems.category_name,
+    snap_kind: saleItems.option_kind,
+    snap_units: saleItems.stock_units,
+    live_category: categories.name,
   }).from(saleItems)
     .innerJoin(sales, eq(saleItems.sale_id, sales.id))
     .leftJoin(menuItems, eq(saleItems.item_id_ref, menuItems.id))
     .leftJoin(categories, eq(menuItems.category_id, categories.id))
     .where(and(...whereClauses))
 
-  const saleItemIds = rows.map(r => r.sale_item_id)
-  const addonRows = saleItemIds.length
+  const addonRows = rows.length
     ? await db.select({
         addon_name: saleItemAddons.addon_name,
         qty: saleItemAddons.qty,
@@ -1708,28 +1738,49 @@ app.get('/api/reports/sales-by-item', async (c) => {
         .where(and(...whereClauses))
     : []
 
-  // ── Group into categories -> items -> sizes ──────────────────────
-  type SizeBucket = Record<string, number> // size_name -> qty
-  type ItemBucket = { item_name: string; sizes: SizeBucket; flat_qty: number }
-  type CategoryBucket = { category_name: string; kind: 'drink' | 'flavor_qty' | 'other'; items: Map<string, ItemBucket> }
+  type ItemBucket = { item_name: string; sizes: Record<string, number>; flat_qty: number; units: number }
+  type CategoryBucket = { category_name: string; kind: ReportKind; items: Map<string, ItemBucket> }
 
   const UNCATEGORIZED = 'Uncategorized / Deleted Items'
   const categoryMap = new Map<string, CategoryBucket>()
+  const sizeTotals: Record<string, number> = {}
+  const flavorQtyTotals: Record<string, number> = {}
+  const unitTotals: Record<string, number> = {}
+  const standaloneAddonTotals: Record<string, number> = {}
 
   for (const r of rows) {
-    const catName = r.category_name ?? UNCATEGORIZED
-    const kind = r.category_name ? categoryKind(r.category_name) : 'other'
+    const catName = r.snap_category ?? r.live_category ?? UNCATEGORIZED
+    const kind = reportKind(r.snap_kind, catName !== UNCATEGORIZED)
+    const units = r.qty * (r.snap_units ?? 1)
+
+    // Standalone add-ons (Rice, Egg, Sauce, ...) sold as their own line:
+    // their own table, never mixed into drink sizes or item categories.
+    if (r.snap_kind === 'addon') {
+      const label = r.size_name ?? r.item_name
+      standaloneAddonTotals[label] = (standaloneAddonTotals[label] ?? 0) + r.qty
+      continue
+    }
+
     if (!categoryMap.has(catName)) {
       categoryMap.set(catName, { category_name: catName, kind, items: new Map() })
     }
     const cat = categoryMap.get(catName)!
+    if (kind === 'flavor_qty') cat.kind = 'flavor_qty' // variant wins: size columns would be meaningless
     if (!cat.items.has(r.item_name)) {
-      cat.items.set(r.item_name, { item_name: r.item_name, sizes: {}, flat_qty: 0 })
+      cat.items.set(r.item_name, { item_name: r.item_name, sizes: {}, flat_qty: 0, units: 0 })
     }
     const item = cat.items.get(r.item_name)!
-    const sizeLabel = r.size_name ?? 'None'
-    item.sizes[sizeLabel] = (item.sizes[sizeLabel] ?? 0) + r.qty
+    const label = r.size_name ?? 'None'
+    item.sizes[label] = (item.sizes[label] ?? 0) + r.qty
     item.flat_qty += r.qty
+    item.units += units
+
+    if (kind === 'drink') {
+      sizeTotals[label] = (sizeTotals[label] ?? 0) + r.qty
+    } else if (kind === 'flavor_qty') {
+      flavorQtyTotals[catName] = (flavorQtyTotals[catName] ?? 0) + r.qty
+      unitTotals[catName] = (unitTotals[catName] ?? 0) + units
+    }
   }
 
   const categoriesOut = [...categoryMap.values()].map(cat => ({
@@ -1737,44 +1788,27 @@ app.get('/api/reports/sales-by-item', async (c) => {
     kind: cat.kind,
     items: [...cat.items.values()].map(i => ({
       item_name: i.item_name,
-      sizes: i.sizes,       // e.g. { Large: 5, Regular: 10 } — always present, even for flavor_qty categories
-      flat_qty: i.flat_qty, // ignores variant, used by flavor_qty summary cards
+      sizes: i.sizes,
+      flat_qty: i.flat_qty,
+      units: round2(i.units),
     })),
   }))
+  for (const k of Object.keys(unitTotals)) unitTotals[k] = round2(unitTotals[k])
 
-  // ── Headline summary ──────────────────────────────────────────────
-  // Drink categories: combine literal size_name totals across ALL
-  // 'drink'-kind categories into one Large-cups / Regular-cups total.
-  const sizeTotals: Record<string, number> = {}
-  // flavor_qty categories: one flat total per category (e.g. "Rice Meals").
-  const flavorQtyTotals: Record<string, number> = {}
-
-  for (const cat of categoryMap.values()) {
-    for (const item of cat.items.values()) {
-      if (cat.kind === 'drink') {
-        for (const [size, qty] of Object.entries(item.sizes)) {
-          sizeTotals[size] = (sizeTotals[size] ?? 0) + qty
-        }
-      } else if (cat.kind === 'flavor_qty') {
-        flavorQtyTotals[cat.category_name] = (flavorQtyTotals[cat.category_name] ?? 0) + item.flat_qty
-      }
-    }
-  }
-
-  // ── Add-ons ────────────────────────────────────────────────────────
   const addonTotals: Record<string, number> = {}
   for (const a of addonRows) {
     addonTotals[a.addon_name] = (addonTotals[a.addon_name] ?? 0) + a.qty
   }
-  const addonsOut = Object.entries(addonTotals)
-    .map(([addon_name, qty]) => ({ addon_name, qty }))
-    .sort((a, b) => b.qty - a.qty)
+  const toSortedList = (m: Record<string, number>) =>
+    Object.entries(m).map(([addon_name, qty]) => ({ addon_name, qty })).sort((a, b) => b.qty - a.qty)
 
   return jsonOk({
-    size_totals: sizeTotals,           // e.g. { Large: 19, Regular: 27 }
-    flavor_qty_totals: flavorQtyTotals, // e.g. { "Rice Meals": 14, "Snacks": 9 }
+    size_totals: sizeTotals,
+    flavor_qty_totals: flavorQtyTotals,
+    unit_totals: unitTotals,
     categories: categoriesOut,
-    addons: addonsOut,
+    addons: toSortedList(addonTotals),                    // add-ons attached to other items
+    standalone_addons: toSortedList(standaloneAddonTotals), // add-ons sold on their own
   })
 })
 
@@ -1882,16 +1916,18 @@ app.get('/api/audit-logs', async (c) => {
     .innerJoin(users, eq(users.id, auditLogs.user_id))
     .orderBy(desc(auditLogs.created_at)).$dynamic()
 
-  if (entity_type) query = query.where(eq(auditLogs.entity_type, entity_type))
-  if (entity_id) query = query.where(eq(auditLogs.entity_id, entity_id))
+  // [proper-fix] one combined where(): chained .where() calls replace each other
+  const auditConditions: SQL[] = []
+  if (entity_type) auditConditions.push(eq(auditLogs.entity_type, entity_type))
+  if (entity_id) auditConditions.push(eq(auditLogs.entity_id, entity_id))
   try {
-    if (date_from) query = query.where(gte(auditLogs.created_at, manilaToUTC(date_from, 'start')))
-    if (date_to) query = query.where(lte(auditLogs.created_at, manilaToUTC(date_to, 'end')))
+    if (date_from) auditConditions.push(gte(auditLogs.created_at, manilaToUTC(date_from, 'start')))
+    if (date_to) auditConditions.push(lte(auditLogs.created_at, manilaToUTC(date_to, 'end')))
   } catch (err) {
     return jsonErr(err instanceof Error ? err.message : 'Invalid date parameter', 400)
   }
 
-  const logs = await query.limit(500)
+  const logs = await query.where(and(...auditConditions)).limit(500)
   return jsonOk(logs)
 })
 

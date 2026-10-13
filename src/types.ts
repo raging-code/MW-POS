@@ -26,6 +26,8 @@ export interface ItemSize {
   id: string;
   name: string;
   price: number;
+  option_kind?: 'size' | 'variant' | 'addon'; // what `name` means
+  stock_units?: number;                       // physical units used per 1 order
 }
 
 export interface Addon {
