@@ -342,6 +342,7 @@ export function useCheckout() {
       // ₱0.00) totals after a checkout.
       qc.invalidateQueries({ queryKey: ['report-sales'] })
       qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-by-item'] })
     },
   })
 }
@@ -388,6 +389,7 @@ export function useVoidSale() {
       qc.invalidateQueries({ queryKey: ['sales'] })
       qc.invalidateQueries({ queryKey: ['report-sales'] })
       qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-by-item'] })
     },
   })
 }
@@ -408,6 +410,7 @@ export function useRefundSale() {
       qc.invalidateQueries({ queryKey: ['sales'] })
       qc.invalidateQueries({ queryKey: ['report-sales'] })
       qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-by-item'] })
     },
   })
 }
@@ -422,6 +425,7 @@ export function useSoftDeleteSale() {
       qc.invalidateQueries({ queryKey: ['sales'] })
       qc.invalidateQueries({ queryKey: ['report-sales'] })
       qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-by-item'] })
     },
   })
 }
@@ -437,6 +441,7 @@ export function usePurgeAllSales() {
       qc.invalidateQueries({ queryKey: ['shifts'] })
       qc.invalidateQueries({ queryKey: ['report-sales'] })
       qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-by-item'] })
     },
   })
 }
@@ -469,6 +474,7 @@ export function useEditSale() {
       qc.invalidateQueries({ queryKey: ['sale', vars.id] })
       qc.invalidateQueries({ queryKey: ['report-sales'] })
       qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
+      qc.invalidateQueries({ queryKey: ['report-sales-by-item'] })
     },
   })
 }
@@ -552,6 +558,7 @@ export function useSalesByItemReport(params?: { date_from?: string; date_to?: st
     queryKey: ['report-sales-by-item', params],
     queryFn: ({ signal }) => api.get<SalesByItemReport>(`/reports/sales-by-item?${qs}`, signal),
     placeholderData: keepPreviousData,
+    staleTime: 0, // [fix-sbi2] always refetch when the report is opened
   })
 }
 
