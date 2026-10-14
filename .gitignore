@@ -30,3 +30,6 @@ worker/.wrangler
 *.critical-fix-backup
 *.pinfix-backup
 patch-*.mjs
+# Backups
+*.bak
+backup-*.sql

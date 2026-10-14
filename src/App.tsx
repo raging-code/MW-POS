@@ -3097,12 +3097,27 @@ const SALES_BY_ITEM_CATEGORY_DOTS: Record<string, string> = {
 const SalesByItemPanel = memo(function SalesByItemPanel({
   dateFrom, dateTo,
 }: { dateFrom: string; dateTo: string }) {
-  const { data: report, isLoading } = useSalesByItemReport({ date_from: dateFrom, date_to: dateTo });
+  const { data: report, isLoading, isError: reportError, refetch: refetchReport } = useSalesByItemReport({ date_from: dateFrom, date_to: dateTo });
 
   if (isLoading) {
     return (
       <div className="p-4 space-y-3">
         {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 shimmer rounded-2xl" />)}
+      </div>
+    );
+  }
+
+  // [fix-sbi] error state: a failed request must not look like "no sales"
+  if (reportError && !report) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 text-center gap-3">
+        <p className="text-red-500 text-sm font-medium">Couldn't load the sales-by-item report.</p>
+        <button
+          onClick={() => refetchReport()}
+          className="px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-semibold"
+        >
+          Retry
+        </button>
       </div>
     );
   }

@@ -1709,6 +1709,11 @@ app.get('/api/reports/sales-by-item', async (c) => {
     return jsonErr(err instanceof Error ? err.message : 'Invalid date parameter', 400)
   }
 
+  // [fix-sbi] date range check
+  if (date_from && date_to && date_from > date_to) {
+    return jsonErr('date_from must not be after date_to', 400)
+  }
+
   const whereClauses = [eq(sales.status, 'completed')]
   if (from) whereClauses.push(gte(sales.created_at, from))
   if (to) whereClauses.push(lte(sales.created_at, to))
@@ -1748,14 +1753,34 @@ app.get('/api/reports/sales-by-item', async (c) => {
   const unitTotals: Record<string, number> = {}
   const standaloneAddonTotals: Record<string, number> = {}
 
+  // [fix-sbi] per-category kind
+  // A line is a standalone add-on if its option kind says so OR it belongs to
+  // the "Add-ons" category (items there may have been saved with the default
+  // option_kind='size', which used to inflate the cup totals).
+  const isStandaloneAddon = (r: { snap_kind: string | null; snap_category: string | null; live_category: string | null }) =>
+    r.snap_kind === 'addon' || (r.snap_category ?? r.live_category) === 'Add-ons'
+
+  // Decide each category's kind ONCE from all of its rows: any 'variant' row
+  // makes the whole category flavor/variant. Previously the first row won and
+  // later rows were counted by their own (possibly null) kind, so e.g. a Rice
+  // Meals line with a null option_kind leaked into the drink size totals.
+  const catKindMap = new Map<string, ReportKind>()
+  for (const r of rows) {
+    if (isStandaloneAddon(r)) continue
+    const cn = r.snap_category ?? r.live_category ?? UNCATEGORIZED
+    const k = reportKind(r.snap_kind, cn !== UNCATEGORIZED)
+    if (k === 'flavor_qty') catKindMap.set(cn, 'flavor_qty')
+    else if (!catKindMap.has(cn)) catKindMap.set(cn, k)
+  }
+
   for (const r of rows) {
     const catName = r.snap_category ?? r.live_category ?? UNCATEGORIZED
-    const kind = reportKind(r.snap_kind, catName !== UNCATEGORIZED)
+    const kind = catKindMap.get(catName) ?? reportKind(r.snap_kind, catName !== UNCATEGORIZED)
     const units = r.qty * (r.snap_units ?? 1)
 
     // Standalone add-ons (Rice, Egg, Sauce, ...) sold as their own line:
     // their own table, never mixed into drink sizes or item categories.
-    if (r.snap_kind === 'addon') {
+    if (isStandaloneAddon(r)) {
       const label = r.size_name ?? r.item_name
       standaloneAddonTotals[label] = (standaloneAddonTotals[label] ?? 0) + r.qty
       continue
@@ -1770,7 +1795,7 @@ app.get('/api/reports/sales-by-item', async (c) => {
       cat.items.set(r.item_name, { item_name: r.item_name, sizes: {}, flat_qty: 0, units: 0 })
     }
     const item = cat.items.get(r.item_name)!
-    const label = r.size_name ?? 'None'
+    const label = r.size_name ?? 'No size'
     item.sizes[label] = (item.sizes[label] ?? 0) + r.qty
     item.flat_qty += r.qty
     item.units += units
