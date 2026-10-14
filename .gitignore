@@ -34,3 +34,5 @@ backup.sql
 *.sql.bak
 
 backup*.sql
+
+*.bak
