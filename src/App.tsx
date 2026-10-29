@@ -82,7 +82,7 @@ function discountLabel(type: string | null | undefined) {
   switch (type) {
     case 'sc': return 'SC';
     case 'pwd': return 'PWD';
-    case 'p15': return '15%';
+    case 'p15': return '20%';
     case 'p100': return '100%';
     case 'p10': return '-₱10';
     default: return '';
@@ -1944,7 +1944,7 @@ const CartItemRow = memo(function CartItemRow({
 const DISCOUNT_OPTIONS: { type: Exclude<CartItem['discount_type'], null>; label: string; className: string }[] = [
   { type: 'sc',   label: 'Senior Citizen (SC)', className: 'discount-btn-sc' },
   { type: 'pwd',  label: 'PWD',                 className: 'discount-btn-pwd' },
-  { type: 'p15',  label: '15% Off',             className: 'discount-btn-p15' },
+  { type: 'p15',  label: '20% Off',             className: 'discount-btn-p15' },
   { type: 'p100', label: '100% Off',            className: 'discount-btn-p100' },
   { type: 'p10',  label: '-₱10 Discount',       className: 'discount-btn-p10' },
 ];

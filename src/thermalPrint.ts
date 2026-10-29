@@ -261,7 +261,7 @@ p(line(dashes(cols)));
       p(line(columns(`  + ${a.addon_name} x${a.qty}`, fmtMoney(a.addon_price * a.qty), cols)));
     }
     if (item.discount_amount > 0) {
-      p(line(columns(`  ${(item.discount_type ?? 'DISC').toUpperCase()} Disc`, `-${fmtMoney(item.discount_amount)}`, cols)));
+      p(line(columns(`  ${item.discount_type === 'p15' ? '20%' : (item.discount_type ?? 'DISC').toUpperCase()} Disc`, `-${fmtMoney(item.discount_amount)}`, cols)));
     }
   }
  

@@ -1141,7 +1141,7 @@ app.post('/api/sales', async (c) => {
       discAmt = 0
     } else if (item.discount_type === 'sc') discAmt = Math.min(scAmt, itemBase)
     else if (item.discount_type === 'pwd') discAmt = Math.min(pwdAmt, itemBase)
-    else if (item.discount_type === 'p15') discAmt = itemBase * 0.15
+    else if (item.discount_type === 'p15') discAmt = itemBase * 0.20 // 20% (key kept as 'p15' for DB compatibility)
     else if (item.discount_type === 'p100') discAmt = itemBase
     else if (item.discount_pct > 0) discAmt = itemBase * (item.discount_pct / 100)
     discAmt = Math.round(discAmt * 100) / 100
