@@ -24,7 +24,7 @@ import {
   useUsersList, useLogin, useVerifyPin, useMenu, useCurrentShift,
   useOpenShift, useCloseShift, useCashDrop, useCashIn, useHeldOrders,
   useCreateHeldOrder, useDeleteHeldOrder, useCheckout, useSales,
-  useSaleDetail, useVoidSale, useRefundSale, useSoftDeleteSale,
+  useSaleDetail, useVoidSale, useRefundSale,
   useReprintSale, useSalesReport, useSettings, useUpdateSettings, usePurgeAllSales,
   useUsers, useCreateUser, useUpdateUser, useDeleteUser, useResetPin,
   useAuditLogs, useToggleAvailability, useCreateMenuItem,
@@ -3408,6 +3408,9 @@ function SalesPage() {
                 <div className="text-gray-900 font-mono font-700 text-base" style={{ fontWeight: 700 }}>{saleDetail.receipt_number}</div>
                 <div className="text-xs text-gray-400 font-medium mt-0.5">{saleDetail.cashier_name}</div>
               </div>
+              {saleDetail.status !== 'completed' && (
+                <Badge color={statusColor(saleDetail.status)}>{statusLabel(saleDetail.status)}</Badge>
+              )}
               {saleDetail.status !== 'completed' && (
                 <Badge color={statusColor(saleDetail.status)}>{statusLabel(saleDetail.status)}</Badge>
               )}
