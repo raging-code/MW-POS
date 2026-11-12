@@ -1456,21 +1456,6 @@ app.post('/api/sales/:id/refund', async (c) => {
   return jsonOk({ ok: true })
 })
 
-// DELETE /api/sales/:id — soft delete (admin only)
-app.delete('/api/sales/:id', async (c) => {
-  const actor = c.get('user')
-  if (actor.role !== 'admin') return jsonErr('Admin only', 403)
-  const db = c.get('db')
-  const id = c.req.param('id')
-  const body = await c.req.json<{ reason: string }>()
-  if (!body.reason) return jsonErr('Reason required')
-  const sale = await db.select().from(sales).where(eq(sales.id, id)).get()
-  if (!sale) return jsonErr('Sale not found', 404)
-  await db.update(sales).set({ status: 'soft_deleted' }).where(eq(sales.id, id))
-  await createAuditLog(db, actor.id, 'soft_delete_sale', 'sale', id, sale, { status: 'soft_deleted' }, body.reason)
-  return jsonOk({ ok: true })
-})
-
 // POST /api/sales/purge-all — HARD delete ALL sales data (admin only)
 // Wipes sales, sale_items, sale_item_addons, sale_payments, cash_drops,
 // and shifts. Resets receipt_counters so numbering restarts cleanly.

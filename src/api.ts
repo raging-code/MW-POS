@@ -387,6 +387,7 @@ export function useVoidSale() {
       api.post(`/sales/${id}/void`, { reason, actioned_by_user_id, actioned_by_name }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sales'] })
+      qc.invalidateQueries({ queryKey: ['sale'] })
       qc.invalidateQueries({ queryKey: ['report-sales'] })
       qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
       qc.invalidateQueries({ queryKey: ['report-sales-by-item'] })
@@ -408,21 +409,7 @@ export function useRefundSale() {
       api.post(`/sales/${id}/refund`, { reason, actioned_by_user_id, actioned_by_name }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sales'] })
-      qc.invalidateQueries({ queryKey: ['report-sales'] })
-      qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
-      qc.invalidateQueries({ queryKey: ['report-sales-by-item'] })
-    },
-  })
-}
-
-export function useSoftDeleteSale() {
-  const api = useApi()
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
-      api.del(`/sales/${id}`, { reason }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sales'] })
+      qc.invalidateQueries({ queryKey: ['sale'] })
       qc.invalidateQueries({ queryKey: ['report-sales'] })
       qc.invalidateQueries({ queryKey: ['report-sales-detailed'] })
       qc.invalidateQueries({ queryKey: ['report-sales-by-item'] })

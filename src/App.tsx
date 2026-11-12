@@ -3257,10 +3257,7 @@ function SalesPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [actionModal, setActionModal] = useState<{ type: 'void' | 'refund' } | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [deleteModal, setDeleteModal] = useState(false);
-  const [deleteReason, setDeleteReason] = useState('');
   const [showAnyPinForReprint, setShowAnyPinForReprint] = useState(false);
-  const [showAnyPinForDelete, setShowAnyPinForDelete] = useState(false);
 
   const { data: sales, isLoading, refetch } = useSales({
     date_from: dateFrom, date_to: dateTo,
@@ -3270,7 +3267,6 @@ function SalesPage() {
   useEffect(() => { refetchRef.current = refetch; }, [refetch]);
   const { data: saleDetail } = useSaleDetail(selectedId);
   const { data: settings } = useSettings();
-  const softDelete = useSoftDeleteSale();
   const reprint = useReprintSale();
 
   const handleReprint = useCallback(() => setShowAnyPinForReprint(true), []);
@@ -3291,24 +3287,6 @@ function SalesPage() {
       toast(e instanceof Error ? e.message : 'Reprint failed', 'error');
     }
   }, [saleDetail, reprint, settings]);
-
-  const handleDeleteConfirm = useCallback(() => {
-    if (!deleteReason) return;
-    setDeleteModal(false);
-    setShowAnyPinForDelete(true);
-  }, [deleteReason]);
-
-  const doDelete = useCallback(async (actioner: { user_id: string; user_name: string; role: string }) => {
-    if (!saleDetail || !deleteReason) return;
-    setShowAnyPinForDelete(false);
-    try {
-      await softDelete.mutateAsync({ id: saleDetail.id, reason: deleteReason });
-      toast('Sale deleted');
-      setDeleteReason(''); setSelectedId(null); refetchRef.current();
-    } catch (e: unknown) {
-      toast(e instanceof Error ? e.message : 'Delete failed', 'error');
-    }
-  }, [saleDetail, deleteReason, softDelete]);
 
   const statusColor = useCallback((s: string) =>
     // FIXED: explicit 'soft_deleted' mapping so the badge never renders the raw DB value
@@ -3409,7 +3387,7 @@ function SalesPage() {
                       <div className="text-gray-400 text-xs mt-0.5 font-medium">{fmtDate(sale.created_at)}</div>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className="font-800 text-amber-900 text-base" style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
+                      <div className={clsx('font-800 text-base', sale.status === 'completed' ? 'text-amber-900' : 'text-gray-400 line-through')} style={{ fontFamily: 'var(--font-display)', fontWeight: 800 }}>
                         {fmt(sale.total)}
                       </div>
                       {sale.discount_total > 0 && (
@@ -3430,6 +3408,9 @@ function SalesPage() {
                 <div className="text-gray-900 font-mono font-700 text-base" style={{ fontWeight: 700 }}>{saleDetail.receipt_number}</div>
                 <div className="text-xs text-gray-400 font-medium mt-0.5">{saleDetail.cashier_name}</div>
               </div>
+              {saleDetail.status !== 'completed' && (
+                <Badge color={statusColor(saleDetail.status)}>{statusLabel(saleDetail.status)}</Badge>
+              )}
               {saleDetail.status === 'completed' && (
                 <Btn size="sm" variant="secondary" onClick={handleReprint}>
                   <Printer size={12} /> Reprint
@@ -3495,9 +3476,6 @@ function SalesPage() {
                 </Btn>
                 <Btn size="sm" variant="secondary" className="flex-1" onClick={() => setActionModal({ type: 'void' })}>Void</Btn>
                 <Btn size="sm" variant="secondary" className="flex-1" onClick={() => setActionModal({ type: 'refund' })}>Refund</Btn>
-                <Btn size="sm" variant="danger" onClick={() => { setDeleteModal(true); setDeleteReason(''); }} title="Delete sale">
-                  <Trash2 size={13} />
-                </Btn>
               </div>
             )}
           </div>
@@ -3508,7 +3486,7 @@ function SalesPage() {
       {actionModal && saleDetail && (
         <PartialActionModal sale={saleDetail} action={actionModal.type}
           onClose={() => setActionModal(null)}
-          onDone={() => { setActionModal(null); setSelectedId(null); refetchRef.current(); }} />
+          onDone={() => { setActionModal(null); refetchRef.current(); }} />
       )}
 
       {showEditModal && saleDetail && (
@@ -3519,17 +3497,6 @@ function SalesPage() {
         />
       )}
 
-      <Modal open={deleteModal} onClose={() => setDeleteModal(false)} title="Delete Sale">
-        <div className="flex flex-col gap-4">
-          <p className="text-sm text-gray-500">Please provide a reason for deletion.</p>
-          <Input label="Reason" value={deleteReason} onChange={setDeleteReason} autoFocus />
-          <div className="flex gap-2">
-            <Btn variant="secondary" onClick={() => setDeleteModal(false)} className="flex-1">Cancel</Btn>
-            <Btn variant="danger" onClick={handleDeleteConfirm} disabled={!deleteReason} className="flex-1">Continue</Btn>
-          </div>
-        </div>
-      </Modal>
-
       <AnyUserPinModal
         open={showAnyPinForReprint}
         onClose={() => setShowAnyPinForReprint(false)}
@@ -3538,13 +3505,6 @@ function SalesPage() {
         description="Enter your PIN to authorize this reprint."
       />
 
-      <AnyUserPinModal
-        open={showAnyPinForDelete}
-        onClose={() => setShowAnyPinForDelete(false)}
-        onSuccess={doDelete}
-        title="🔒 Authorize Delete"
-        description="Enter your PIN to permanently delete this sale."
-      />
     </div>
   );
 }
@@ -4714,7 +4674,6 @@ function DetailedReportModal({ onClose }: { onClose: () => void }) {
             <KpiCard icon={<AlertTriangle size={18} />} label="Voided" value={String(data.voided_count ?? 0)} color="red" />
             <KpiCard icon={<RefreshCw size={18} />} label="Refunded" value={String(data.refunded_count ?? 0)} color="yellow" />
             <KpiCard icon={<Edit2 size={18} />} label="Edited" value={String(data.edited_count ?? 0)} color="gray" />
-            <KpiCard icon={<Trash2 size={18} />} label="Deleted" value={String(data.deleted_count ?? 0)} color="gray" />
           </div>
         ) : (
           <p className="text-gray-400 text-center py-8">No data for selected period.</p>
